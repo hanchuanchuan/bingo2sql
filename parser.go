@@ -10,6 +10,13 @@ import (
     "context"
     "database/sql/driver"
     "fmt"
+    "os"
+    "reflect"
+    "strconv"
+    "strings"
+    "sync"
+    "time"
+
     "github.com/jinzhu/gorm"
     _ "github.com/jinzhu/gorm/dialects/mysql"
     "github.com/juju/errors"
@@ -17,14 +24,7 @@ import (
     "github.com/rs/zerolog/log"
     "github.com/satori/go.uuid"
     "github.com/siddontang/go-mysql/mysql"
-    "os"
-    "reflect"
-    // "replication"
     "github.com/siddontang/go-mysql/replication"
-    "strconv"
-    "strings"
-    "sync"
-    "time"
 )
 
 const digits01 = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
@@ -254,7 +254,7 @@ func (cfg *BinlogParserConfig) Id() string {
         s2)
 }
 
-func (p *MyBinlogParser) Parser() {
+func (p *MyBinlogParser) Parser() error {
 
     var wg sync.WaitGroup
 
@@ -280,7 +280,9 @@ func (p *MyBinlogParser) Parser() {
     p.running = true
 
     p.db, err = p.getDB()
-    p.checkError(err)
+    if err != nil{
+        return err
+    }
     defer p.db.Close()
 
     log.Debug().Str("timeTrack", time.Since(timeStart).String()).Msg("用时")
@@ -295,7 +297,9 @@ func (p *MyBinlogParser) Parser() {
         } else {
             p.outputFile, err = os.Create(p.outputFileName)
         }
-        p.checkError(err)
+        if err != nil{
+            return err
+        }
 
         // outputFile, err := os.OpenFile(outputFileStr, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
         // if err != nil {
@@ -331,7 +335,7 @@ func (p *MyBinlogParser) Parser() {
     s, err := b.StartSync(pos)
     if err != nil {
         log.Info().Msgf("Start sync error: %v\n", errors.ErrorStack(err))
-        return
+        return nil
     }
 
     i := 0
@@ -349,7 +353,7 @@ func (p *MyBinlogParser) Parser() {
 
     // fmt.Println(endPos)
     for {
-        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
         defer cancel()
         // e, err := s.GetEvent(context.Background())
         e, err := s.GetEvent(ctx)
@@ -443,7 +447,9 @@ func (p *MyBinlogParser) Parser() {
                 }
 
                 _, err = p.tableInformation(event.TableID, event.Schema, event.Table)
-                p.checkError(err)
+                if err != nil{
+                    return err
+                }
             }
         } else if e.Header.EventType == replication.QUERY_EVENT {
             // 回滚或者仅dml语句时 跳过
@@ -482,7 +488,7 @@ func (p *MyBinlogParser) Parser() {
                     //                    e_start_pos = last_pos
                 }
             }
-        } else if _, ok := p.cfg.SqlTypes["INSERT"]; ok &&
+        } else if _, ok := p.cfg.SqlTypes["insert"]; ok &&
             e.Header.EventType == replication.WRITE_ROWS_EVENTv2 {
             if event, ok := e.Event.(*replication.RowsEvent); ok {
                 if !p.schemaFilter(event.Table) {
@@ -494,18 +500,22 @@ func (p *MyBinlogParser) Parser() {
                 }
 
                 table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
-                p.checkError(err)
+                if err != nil{
+                    return err
+                }
 
                 if p.cfg.Flashback {
                     _, err = p.generateDeleteSql(table, event, e)
                 } else {
                     _, err = p.generateInsertSql(table, event, e)
                 }
-                p.checkError(err)
+                if err != nil{
+                    return err
+                }
                 i = i + len(event.Rows)
                 // log.Info().Int("i", i).Int("len行数", len(event.Rows)).Msg("解析行数")
             }
-        } else if _, ok := p.cfg.SqlTypes["DELETE"]; ok &&
+        } else if _, ok := p.cfg.SqlTypes["delete"]; ok &&
             e.Header.EventType == replication.DELETE_ROWS_EVENTv2 {
             if event, ok := e.Event.(*replication.RowsEvent); ok {
                 if !p.schemaFilter(event.Table) {
@@ -524,11 +534,13 @@ func (p *MyBinlogParser) Parser() {
                 } else {
                     _, err = p.generateDeleteSql(table, event, e)
                 }
-                p.checkError(err)
+                if err != nil{
+                    return err
+                }
                 i = i + len(event.Rows)
                 // log.Info().Int("i", i).Int("len行数", len(event.Rows)).Msg("解析行数")
             }
-        } else if _, ok := p.cfg.SqlTypes["UPDATE"]; ok &&
+        } else if _, ok := p.cfg.SqlTypes["update"]; ok &&
             e.Header.EventType == replication.UPDATE_ROWS_EVENTv2 {
             if event, ok := e.Event.(*replication.RowsEvent); ok {
                 if !p.schemaFilter(event.Table) {
@@ -540,9 +552,13 @@ func (p *MyBinlogParser) Parser() {
                 }
 
                 table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
-                p.checkError(err)
+                if err != nil{
+                    return err
+                }
                 _, err = p.generateUpdateSql(table, event, e)
-                p.checkError(err)
+                if err != nil{
+                    return err
+                }
                 i = i + len(event.Rows)/2
             }
         }
@@ -654,7 +670,9 @@ func (p *MyBinlogParser) Parser() {
             //     []string{p.outputFileName},
             //     url)
             err := archiver.Archive([]string{p.outputFileName}, url)
-            p.checkError(err)
+            if err != nil{
+                return err
+            }
 
             fileInfo, _ := os.Stat(url)
             //文件大小
@@ -680,6 +698,7 @@ func (p *MyBinlogParser) Parser() {
     }
 
     log.Info().Msg("操作结束")
+    return nil
 }
 
 func (p *MyBinlogParser) clear() {
@@ -814,7 +833,8 @@ func (p *MyBinlogParser) write2(b []byte) {
     }
 }
 
-func NewBinlogParser(cfg *BinlogParserConfig) *MyBinlogParser {
+// NewBinlogParser binlog解析器
+func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser,error) {
 
     p := new(MyBinlogParser)
 
@@ -828,18 +848,20 @@ func NewBinlogParser(cfg *BinlogParserConfig) *MyBinlogParser {
 
     var err error
     p.db, err = p.getDB()
-    p.checkError(err)
+    if err !=nil{
+        return nil,err
+    }
     defer p.db.Close()
 
     if len(p.cfg.StartTime) == 0 {
         if len(p.startFile) == 0 {
-            p.checkError(errors.New("未指定binlog解析起点"))
+           return nil,errors.New("未指定binlog解析起点")
         }
     }
 
     p.parseGtidSets()
 
-    if len(cfg.SocketUser) > 0 {
+    if len(cfg.SocketUser) > 0 || cfg.OutputFileStr == ""{
         var fileName []string
         fileName = append(fileName, strings.Replace(cfg.Host, ".", "_", -1))
         fileName = append(fileName, strconv.Itoa(int(cfg.Port)))
@@ -856,27 +878,31 @@ func NewBinlogParser(cfg *BinlogParserConfig) *MyBinlogParser {
             fileName = append(fileName, "rollback")
         }
 
-        // p.outputFileName = fmt.Sprintf("../files/%d.sql", time.Now().Unix())
-        p.outputFileName = fmt.Sprintf("../files/%s.sql", strings.Join(fileName, "_"))
+        // p.outputFileName = fmt.Sprintf("files/%d.sql", time.Now().Unix())
+        p.outputFileName = fmt.Sprintf("files/%s.sql", strings.Join(fileName, "_"))
     } else {
-        p.outputFileName = cfg.OutputFileStr
+            p.outputFileName = cfg.OutputFileStr
     }
 
     err = p.parserInit()
-    p.checkError(err)
+    if err !=nil{
+        return nil,err
+    }
 
     if p.cfg.Debug {
         p.db.LogMode(true)
     }
 
     p.masterStatus, err = p.mysqlMasterStatus()
-    p.checkError(err)
+    if err !=nil{
+        return nil,err
+    }
 
     p.write1 = p
 
     p.ch = make(chan *row, 50)
 
-    return p
+    return p,nil
 }
 
 func (p *MyBinlogParser) ProcessChan(wg *sync.WaitGroup) {
@@ -932,6 +958,15 @@ func (p *MyBinlogParser) parseGtidSets() {
 }
 
 func (p *baseParser) getDB() (*gorm.DB, error) {
+    if p.cfg.Host == ""{
+        return nil,fmt.Errorf("请指定数据库地址")
+    }
+    if p.cfg.Port == 0{
+        return nil,fmt.Errorf("请指定数据库端口")
+    }
+    if p.cfg.User == ""{
+        return nil,fmt.Errorf("请指定数据库用户名")
+    }
     addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/mysql?charset=utf8mb4&parseTime=True&loc=Local",
         p.cfg.User, p.cfg.Password, p.cfg.Host, p.cfg.Port)
 
@@ -966,10 +1001,14 @@ func (p *MyBinlogParser) parserInit() error {
         p.bufferWriter = bufio.NewWriter(p.outputFile)
     }
 
-    p.startTimestamp, err = timeParseToUnix(p.cfg.StartTime)
-    p.checkError(err)
-    p.stopTimestamp, err = timeParseToUnix(p.cfg.StopTime)
-    p.checkError(err)
+    if p.cfg.StartTime != ""{
+        p.startTimestamp, err = timeParseToUnix(p.cfg.StartTime)
+        p.checkError(err)
+    }
+    if p.cfg.StopTime != ""{
+        p.stopTimestamp, err = timeParseToUnix(p.cfg.StopTime)
+        p.checkError(err)
+    }
 
     // 如果未指定开始文件,就自动解析
     if len(p.startFile) == 0 {
@@ -990,11 +1029,8 @@ func (p *MyBinlogParser) parserInit() error {
                 p.startFile = masterLog.Name
             }
 
-            if timestamp <= p.stopTimestamp {
+            if p.stopTimestamp > 0 && timestamp <= p.stopTimestamp {
                 p.stopFile = masterLog.Name
-            }
-
-            if timestamp > p.stopTimestamp {
                 break
             }
         }
@@ -1020,9 +1056,9 @@ func (p *MyBinlogParser) parserInit() error {
             p.cfg.SqlTypes[s] = true
         }
     } else {
-        p.cfg.SqlTypes["INSERT"] = true
-        p.cfg.SqlTypes["UPDATE"] = true
-        p.cfg.SqlTypes["DELETE"] = true
+        p.cfg.SqlTypes["insert"] = true
+        p.cfg.SqlTypes["update"] = true
+        p.cfg.SqlTypes["delete"] = true
     }
 
     if len(p.cfg.Databases) > 0 {

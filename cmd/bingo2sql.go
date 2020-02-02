@@ -1,15 +1,13 @@
 package main
 
 import (
-	"fmt"
-
-	parser "github.com/hanchuanchuan/bingo2sql"
-
-	// "github.com/jinzhu/gorm"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
+	"time"
 
+	parser "github.com/hanchuanchuan/bingo2sql"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
@@ -17,9 +15,6 @@ import (
 	"github.com/rs/zerolog/log"
 	log2 "github.com/siddontang/go-log/log"
 	ini "gopkg.in/ini.v1"
-
-	// "strings"
-	"time"
 )
 
 var parserProcess map[string]*parser.MyBinlogParser
@@ -38,8 +33,8 @@ func init() {
 }
 
 var (
-	runServer  = flagBoolean("s", true, "以服务方式运行")
-	configFile = flag.String("c", "config.ini", "myRobot config file")
+	runServer  = flagBoolean("s", false, "以服务方式运行")
+	configFile = flag.String("c", "config.ini", "bingo2sql config file")
 
 	host     = flag.String("h", "", "host")
 	port     = flag.Int("P", 0, "host")
@@ -55,9 +50,9 @@ var (
 	startPosition = flag.Int("start-pos", 0, "start-pos")
 	stopPosition  = flag.Int("stop-pos", 0, "stop-pos")
 
-	flashback = flagBoolean("f", true, "逆向语句")
+	flashback = flagBoolean("f", false, "逆向语句")
 
-	parseDDL = flagBoolean("ddl", true, "解析DDL语句(仅正向SQL)")
+	parseDDL = flagBoolean("ddl", false, "解析DDL语句(仅正向SQL)")
 
 	databases = flag.String("db", "", "数据库列表,多个时以逗号分隔")
 	tables    = flag.String("t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
@@ -69,6 +64,7 @@ var (
 func main() {
 
 	flag.Parse()
+
 	parserProcess = make(map[string]*parser.MyBinlogParser)
 
 	if *configFile == "" {
@@ -76,9 +72,65 @@ func main() {
 		return
 	}
 
+	// 以服务方式运行
+	if *runServer {
+		startServer()
+	} else {
+		output := zerolog.ConsoleWriter{
+			Out:        os.Stdout,
+			TimeFormat: "2006-01-02 15:04:05"}
+		log.Logger = zerolog.New(output).With().Timestamp().Logger()
+
+		// 以独立工具运行
+		runParse()
+	}
+}
+
+// runParse 执行binlog解析
+func runParse() {
+	cfg := &parser.BinlogParserConfig{
+		Host:     *host,
+		Port:     uint16(*port),
+		User:     *user,
+		Password: *password,
+
+		StartFile:     *startFile,
+		StopFile:      *stopFile,
+		StartPosition: *startPosition,
+		StopPosition:  *stopPosition,
+
+		StartTime: *startTime,
+		StopTime:  *stopTime,
+
+		Flashback: *flashback,
+
+		ParseDDL: *parseDDL,
+
+		Databases: *databases,
+		Tables:    *tables,
+		SqlType:   *sqlType,
+		MaxRows:   *maxRows,
+	}
+
+	if p, err := parser.NewBinlogParser(cfg); err != nil {
+		log.Error().Err(err).Msg("binlog解析操作失败")
+		return
+	} else {
+		cfg.BeginTime = time.Now().Unix()
+		err = p.Parser()
+		if err != nil {
+			log.Error().Err(err).Msg("binlog解析操作失败")
+			return
+		}
+	}
+}
+
+// startServer 启动binlog解析服务
+func startServer() {
+	fmt.Println(*runServer)
 	cnf, err := ini.Load(*configFile)
 	if err != nil {
-		fmt.Println(fmt.Sprintf(`read config file %s error: %s`, configFile, err.Error()))
+		fmt.Println(fmt.Sprintf(`read config file %s error: %s`, *configFile, err.Error()))
 		return
 	}
 
@@ -145,7 +197,6 @@ func main() {
 
 	// e.Logger.Fatal(e.Start(addr))
 	e.Logger.Fatal(e.Start(":8077"))
-
 }
 
 func parseBinlog(c echo.Context) error {
@@ -165,7 +216,12 @@ func parseBinlog(c echo.Context) error {
 
 	// cfg.SetRemoteDB()
 
-	p := parser.NewBinlogParser(cfg)
+	p, err := parser.NewBinlogParser(cfg)
+	if err != nil {
+		log.Error().Err(err).Msg("binlog解析操作失败")
+		out := map[string]string{"error": err.Error()}
+		return c.JSON(http.StatusOK, out)
+	}
 
 	if err := recover(); err != nil {
 
