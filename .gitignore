@@ -1,0 +1,9 @@
+files
+bin
+coverage.out
+.idea/
+*.iml
+*.swp
+*.log
+*.fail.go
+.DS_Store
