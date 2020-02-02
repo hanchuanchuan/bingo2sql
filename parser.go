@@ -17,7 +17,6 @@ import (
     "github.com/rs/zerolog/log"
     "github.com/satori/go.uuid"
     "github.com/siddontang/go-mysql/mysql"
-    ini "gopkg.in/ini.v1"
     "os"
     "reflect"
     // "replication"
@@ -776,10 +775,8 @@ func (p *baseParser) write(b []byte, binEvent *replication.BinlogEvent) {
     switch x := p.write1.(type) {
     case *MyBinlogParser:
         p.ch <- &row{sql: b, e: binEvent, gtid: x.gtid}
-        // x.myWrite(b, binEvent, x.gtid)
-    case *MyBinlogParser2:
-        p.ch <- &row{sql: b, e: binEvent, opid: x.currentBackupInfo.OPID}
-        // x.myWrite(b, binEvent, x.currentBackupInfo.OPID)
+    // case *MyBinlogParser2:
+    //     p.ch <- &row{sql: b, e: binEvent, opid: x.currentBackupInfo.OPID}
     }
 }
 
@@ -1883,161 +1880,3 @@ func escapeStringQuotes(buf []byte, v string) []byte {
 //     return nil
 
 // }
-
-// ProcessOpid 解析单个或多个opid,当前仅为了方便测试.
-func ProcessOpid(opids []string, dbname string) {
-
-    dbConfig := &DBConfig{}
-
-    ini_cfg, err := ini.Load("../cnf/config.ini")
-    if err != nil {
-        log.Error().Err(err)
-        return
-    }
-
-    err = ini_cfg.Section("DBConfig").MapTo(dbConfig)
-    if err != nil {
-        log.Error().Err(err)
-        return
-    }
-
-    // fmt.Println(work_id, db_id, dbConfig)
-
-    db, err := dbConfig.GetDB()
-    if err != nil {
-        log.Error().Err(err)
-        return
-    }
-
-    backupDBConfig := &DBConfig{}
-    err = ini_cfg.Section("BackupDBConfig").MapTo(backupDBConfig)
-    if err != nil {
-        log.Error().Err(err)
-        return
-    }
-
-    backupdb, err := backupDBConfig.GetDB()
-    if err != nil {
-        log.Error().Err(err)
-        return
-    }
-
-    var backupInfos BackupInfos
-
-    sql := `SELECT * FROM %s.$_$Inception_backup_information$_$
-        WHERE opid_time IN (?) and start_binlog_pos > 0 ORDER BY opid_time`
-
-    backupdb.Raw(fmt.Sprintf(sql, dbname), opids).Scan(&backupInfos)
-
-    if len(backupInfos) == 0 {
-        log.Info().Msg("未找到备份信息,操作结束")
-        return
-    }
-
-    log.Info().Msg("解析开始")
-
-    cfg := new(BinlogParserConfig)
-    first := backupInfos[0]
-
-    cfg.Host = first.Host
-    cfg.Port = first.Port
-
-    // cfg.SetRemoteDBUser(db)
-
-    cfg.StartFile = first.StartFile
-    cfg.StartPosition = first.StartPosition
-
-    cfg.SocketUser = "hanchuanchuan"
-
-    p, _ := NewBinlogParser2(cfg)
-
-    p.localdb = db
-    p.backupdb = backupdb
-
-    r := &incRecords{
-        localdb:  db,
-        backupdb: backupdb,
-        fetchEnd: true,
-    }
-
-    p.backupInfos = backupInfos.Iterator(r)
-    p.Parser2()
-
-}
-
-// // ProcessOpid 解析单个或多个opid,当前仅为了方便测试.
-// func ProcessOpid(opids []string, dbname string) {
-
-//     dbConfig := &DBConfig{}
-
-//     ini_cfg, err := ini.Load("../cnf/config.ini")
-//     if err != nil {
-//         log.Error().Err(err)
-//         return
-//     }
-
-//     err = ini_cfg.Section("DBConfig").MapTo(dbConfig)
-//     if err != nil {
-//         log.Error().Err(err)
-//         return
-//     }
-
-//     // fmt.Println(work_id, db_id, dbConfig)
-
-//     db, err := dbConfig.GetDB()
-//     if err != nil {
-//         log.Error().Err(err)
-//         return
-//     }
-
-//     backupDBConfig := &DBConfig{}
-//     err = ini_cfg.Section("BackupDBConfig").MapTo(backupDBConfig)
-//     if err != nil {
-//         log.Error().Err(err)
-//         return
-//     }
-
-//     backupdb, err := backupDBConfig.GetDB()
-//     if err != nil {
-//         log.Error().Err(err)
-//         return
-//     }
-
-//     var backupInfos BackupInfos
-
-//     sql := `SELECT * FROM %s.$_$Inception_backup_information$_$
-//         WHERE opid_time IN (?) and start_binlog_pos > 0 ORDER BY opid_time`
-
-//     backupdb.Raw(fmt.Sprintf(sql, dbname), opids).Scan(&backupInfos)
-
-//     if len(backupInfos) == 0 {
-//         log.Info().Msg("未找到备份信息,操作结束")
-//         return
-//     }
-
-//     log.Info().Msg("解析开始")
-
-//     cfg := new(BinlogParserConfig)
-//     first := backupInfos[0]
-
-//     cfg.Host = first.Host
-//     cfg.Port = first.Port
-
-//     cfg.SetRemoteDBUser(db)
-
-//     cfg.StartFile = first.StartFile
-//     cfg.StartPosition = first.StartPosition
-
-//     cfg.SocketUser = "hanchuanchuan"
-
-//     p, _ := NewBinlogParser2(*cfg)
-
-//     p.localdb = db
-//     p.backupdb = backupdb
-
-//     p.backupInfos = backupInfos.Iterator()
-//     p.Parser2()
-
-// }
-
-

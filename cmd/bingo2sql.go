@@ -37,30 +37,51 @@ func init() {
 	zerolog.TimeFieldFormat = "2006-01-02 15:04:05"
 }
 
+var (
+	runServer  = flagBoolean("s", true, "以服务方式运行")
+	configFile = flag.String("c", "config.ini", "myRobot config file")
+
+	host     = flag.String("h", "", "host")
+	port     = flag.Int("P", 0, "host")
+	user     = flag.String("u", "", "user")
+	password = flag.String("p", "", "password")
+
+	startFile = flag.String("start-file", "", "start-file")
+	stopFile  = flag.String("stop-file", "", "stop-file")
+
+	startTime = flag.String("start-time", "", "start-time")
+	stopTime  = flag.String("stop-time", "", "stop-time")
+
+	startPosition = flag.Int("start-pos", 0, "start-pos")
+	stopPosition  = flag.Int("stop-pos", 0, "stop-pos")
+
+	flashback = flagBoolean("f", true, "逆向语句")
+
+	parseDDL = flagBoolean("ddl", true, "解析DDL语句(仅正向SQL)")
+
+	databases = flag.String("db", "", "数据库列表,多个时以逗号分隔")
+	tables    = flag.String("t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
+	sqlType   = flag.String("type", "insert,delete,update", "解析的语句类型")
+
+	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
+)
+
 func main() {
 
+	flag.Parse()
 	parserProcess = make(map[string]*parser.MyBinlogParser)
 
-	//config file
-	var fc string
-	flag.StringVar(&fc, "c", "config.ini", "myRobot config file")
-	flag.Parse()
-
-	if fc == "" {
+	if *configFile == "" {
 		flag.Usage()
 		return
 	}
 
-	//config file parse
-	// cnf, err := ini.Load(path.Join(dir, fc))
-	cnf, err := ini.Load(fc)
+	cnf, err := ini.Load(*configFile)
 	if err != nil {
-		fmt.Println(fmt.Sprintf(`read config file %s error: %s`, fc, err.Error()))
+		fmt.Println(fmt.Sprintf(`read config file %s error: %s`, configFile, err.Error()))
 		return
 	}
 
-	// addr := cnf.Section("Bingo").Key("addr").String()
-	writeTimeout, _ := cnf.Section("Bingo").Key("writeTimeout").Int()
 	logDir := cnf.Section("Bingo").Key("log").String()
 	httpLogDir := cnf.Section("Bingo").Key("httplog").String()
 	level := cnf.Section("Bingo").Key("logLevel").String()
@@ -101,10 +122,11 @@ func main() {
 
 	//new echo
 	e := echo.New()
-	e.Server.WriteTimeout = time.Duration(writeTimeout) * time.Second
+	e.Server.WriteTimeout = time.Duration(30) * time.Second
 
 	// Middleware
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{Output: httplog, Format: requestHeader}))
+	e.Use(middleware.LoggerWithConfig(
+		middleware.LoggerConfig{Output: httplog, Format: requestHeader}))
 	e.Use(middleware.Recover())
 
 	log.Info().Msg(`parse binlog tool is started`)
@@ -238,4 +260,13 @@ func download(c echo.Context) error {
 	// return c.Inline(path, c.Param("name"))
 
 	// return c.File(path)
+}
+
+func flagBoolean(name string, defaultVal bool, usage string) *bool {
+	if defaultVal == false {
+		// Fix #4125, golang do not print default false value in usage, so we append it.
+		usage = fmt.Sprintf("%s (default false)", usage)
+		return flag.Bool(name, defaultVal, usage)
+	}
+	return flag.Bool(name, defaultVal, usage)
 }
