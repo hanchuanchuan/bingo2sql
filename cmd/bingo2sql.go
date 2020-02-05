@@ -59,6 +59,8 @@ var (
 	sqlType   = flag.String("type", "insert,delete,update", "解析的语句类型")
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
+
+	output = flag.String("o", "", "output file")
 )
 
 func main() {
@@ -110,6 +112,8 @@ func runParse() {
 		Tables:    *tables,
 		SqlType:   *sqlType,
 		MaxRows:   *maxRows,
+
+		OutputFileStr: *output,
 	}
 
 	if p, err := parser.NewBinlogParser(cfg); err != nil {

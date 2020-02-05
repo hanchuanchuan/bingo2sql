@@ -5,26 +5,26 @@ package bingo2sql
 
 // time go run mainRemote.go -start-time="2018-09-17 00:00:00" -stop-time="2018-09-25 00:00:00" -o=1.sql
 import (
-    "bufio"
-    "bytes"
-    "context"
-    "database/sql/driver"
-    "fmt"
-    "os"
-    "reflect"
-    "strconv"
-    "strings"
-    "sync"
-    "time"
+	"bufio"
+	"bytes"
+	"context"
+	"database/sql/driver"
+	"fmt"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
-    "github.com/jinzhu/gorm"
-    _ "github.com/jinzhu/gorm/dialects/mysql"
-    "github.com/juju/errors"
-    "github.com/mholt/archiver/v3"
-    "github.com/rs/zerolog/log"
-    "github.com/satori/go.uuid"
-    "github.com/siddontang/go-mysql/mysql"
-    "github.com/siddontang/go-mysql/replication"
+	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/mysql"
+	"github.com/juju/errors"
+	"github.com/mholt/archiver/v3"
+	"github.com/rs/zerolog/log"
+	uuid "github.com/satori/go.uuid"
+	"github.com/siddontang/go-mysql/mysql"
+	"github.com/siddontang/go-mysql/replication"
 )
 
 const digits01 = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
@@ -861,7 +861,7 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser,error) {
 
     p.parseGtidSets()
 
-    if len(cfg.SocketUser) > 0 || cfg.OutputFileStr == ""{
+    if len(cfg.SocketUser) > 0 {
         var fileName []string
         fileName = append(fileName, strings.Replace(cfg.Host, ".", "_", -1))
         fileName = append(fileName, strconv.Itoa(int(cfg.Port)))
@@ -881,7 +881,11 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser,error) {
         // p.outputFileName = fmt.Sprintf("files/%d.sql", time.Now().Unix())
         p.outputFileName = fmt.Sprintf("files/%s.sql", strings.Join(fileName, "_"))
     } else {
+        if cfg.OutputFileStr != ""{
             p.outputFileName = cfg.OutputFileStr
+        } else{
+            p.outputFile = os.Stdout
+        }
     }
 
     err = p.parserInit()
