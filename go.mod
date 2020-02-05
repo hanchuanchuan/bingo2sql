@@ -16,6 +16,7 @@ require (
 	github.com/pierrec/lz4 v2.4.1+incompatible // indirect
 	github.com/rs/zerolog v1.17.2
 	github.com/satori/go.uuid v1.2.0
+	github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24
 	github.com/siddontang/go-log v0.0.0-20180807004314-8d05993dda07
 	github.com/siddontang/go-mysql v0.0.0-20200120044259-a9add8d89449
 	github.com/smartystreets/goconvey v1.6.4 // indirect
