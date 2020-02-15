@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+	github.com/frankban/quicktest v1.7.2 // indirect
 	github.com/hanchuanchuan/go-mysql v0.0.0-20200114082439-6d0d8d3a982e
 	github.com/imroc/req v0.3.0
 	github.com/jinzhu/gorm v1.9.12
@@ -12,14 +13,13 @@ require (
 	github.com/juju/testing v0.0.0-20191001232224-ce9dec17d28b // indirect
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/gommon v0.3.0 // indirect
-	github.com/mholt/archiver v3.1.1+incompatible
 	github.com/mholt/archiver/v3 v3.3.0
 	github.com/pierrec/lz4 v2.4.1+incompatible // indirect
-	github.com/rs/zerolog v1.17.2
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/satori/go.uuid v1.2.0
 	github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24
 	github.com/siddontang/go-log v0.0.0-20180807004314-8d05993dda07
-	github.com/siddontang/go-mysql v0.0.0-20200120044259-a9add8d89449
+	github.com/sirupsen/logrus v1.4.1
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/valyala/fasttemplate v1.1.0 // indirect
 	gopkg.in/ini.v1 v1.52.0

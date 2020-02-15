@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/imroc/req"
-	"github.com/rs/zerolog/log"
+	log "github.com/sirupsen/logrus"
 )
 
 // const (
@@ -59,7 +59,7 @@ func sendMsg(user string, event string, title string, text string, kwargs map[st
 
 	r, err := req.Post(url, header, param)
 	if err != nil {
-		log.Error().Msg("请求websocket失败!")
+		log.Error("请求websocket失败!")
 		log.Print(err)
 		return false
 	}
@@ -71,7 +71,7 @@ func sendMsg(user string, event string, title string, text string, kwargs map[st
 	if resp.StatusCode == 200 {
 		return true
 	} else {
-		log.Error().Msg("请求websocket失败!")
+		log.Error("请求websocket失败!")
 		log.Printf("%+v", r) // 打印详细信息
 		return false
 	}

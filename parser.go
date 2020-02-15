@@ -18,14 +18,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hanchuanchuan/go-mysql/mysql"
+	"github.com/hanchuanchuan/go-mysql/replication"
 	"github.com/jinzhu/gorm"
 	"github.com/juju/errors"
 	"github.com/mholt/archiver/v3"
-	"github.com/rs/zerolog/log"
 	uuid "github.com/satori/go.uuid"
 	"github.com/shopspring/decimal"
-	"github.com/siddontang/go-mysql/mysql"
-	"github.com/siddontang/go-mysql/replication"
+	log "github.com/sirupsen/logrus"
 )
 
 const digits01 = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
@@ -236,7 +236,7 @@ func (p *MyBinlogParser) Parser() error {
 
 	var wg sync.WaitGroup
 
-	timeStart := time.Now()
+	// timeStart := time.Now()
 	defer timeTrack(time.Now(), "Parser")
 
 	// defer func() {
@@ -263,8 +263,6 @@ func (p *MyBinlogParser) Parser() error {
 	}
 	defer p.db.Close()
 
-	log.Debug().Str("timeTrack", time.Since(timeStart).String()).Msg("用时")
-
 	if len(p.outputFileName) > 0 {
 
 		if Exists(p.outputFileName) {
@@ -281,8 +279,6 @@ func (p *MyBinlogParser) Parser() error {
 
 		p.bufferWriter = bufio.NewWriter(p.outputFile)
 	}
-
-	log.Debug().Str("timeTrack", time.Since(timeStart).String()).Msg("用时")
 
 	endPos := mysql.Position{p.masterStatus.File, uint32(p.masterStatus.Position)}
 
@@ -303,11 +299,9 @@ func (p *MyBinlogParser) Parser() error {
 	defer b.Close()
 	pos := mysql.Position{p.startFile, uint32(p.cfg.StartPosition)}
 
-	log.Debug().Str("timeTrack", time.Since(timeStart).String()).Msg("用时")
-
 	s, err := b.StartSync(pos)
 	if err != nil {
-		log.Info().Msgf("Start sync error: %v\n", errors.ErrorStack(err))
+		log.Infof("Start sync error: %v\n", errors.ErrorStack(err))
 		return nil
 	}
 
@@ -332,10 +326,10 @@ func (p *MyBinlogParser) Parser() error {
 			// events := s.DumpEvents()
 			// for _, e := range events {
 			//  // e.Dump(os.Stdout)
-			//  log.Info().Msg("===============")
-			//  log.Info().Msg(e.Header.EventType)
+			//  log.Info("===============")
+			//  log.Info(e.Header.EventType)
 			// }
-			log.Info().Msgf("Get event error: %v\n", errors.ErrorStack(err))
+			log.Infof("Get event error: %v\n", errors.ErrorStack(err))
 			break
 		}
 
@@ -355,7 +349,7 @@ func (p *MyBinlogParser) Parser() error {
 				continue // goto CHECK_STOP
 			}
 			if p.stopTimestamp > 0 && e.Header.Timestamp > p.stopTimestamp {
-				log.Warn().Msg("已超出结束时间")
+				log.Warn("已超出结束时间")
 				break
 			}
 		}
@@ -369,12 +363,12 @@ func (p *MyBinlogParser) Parser() error {
 			// * binlog文件超出指定结束文件
 			// * 超出指定结束文件和位置
 			// * 超出当前最新binlog位置
-			log.Warn().
-				Str("当前文件", currentPosition.Name).
-				Str("结束文件", p.stopFile).
-				Int("当前位置", int(currentPosition.Pos)).
-				Int("结束位置", int(p.cfg.StopPosition)).
-				Msg("已超出指定位置")
+			log.WithFields(log.Fields{
+				"当前文件": currentPosition.Name,
+				"结束文件": p.stopFile,
+				"当前位置": currentPosition.Pos,
+				"结束位置": p.cfg.StopPosition,
+			}).Info("已超出指定位置")
 			break
 		}
 
@@ -403,7 +397,7 @@ func (p *MyBinlogParser) Parser() error {
 			if status == 1 {
 				continue // goto CHECK_STOP
 			} else if status == 2 {
-				log.Info().Msg("已超出GTID范围,自动结束")
+				log.Info("已超出GTID范围,自动结束")
 				break
 			}
 		}
@@ -447,7 +441,7 @@ func (p *MyBinlogParser) Parser() error {
 					i++
 				} else {
 					// fmt.Println(string(event.Query))
-					// log.Info().Msg("#start %d %d %d", e.Header.LogPos,
+					// log.Info("#start %d %d %d", e.Header.LogPos,
 					//  e.Header.LogPos+e.Header.EventSize,
 					//  e.Header.LogPos-e.Header.EventSize)
 					// if binlog_event.query == 'BEGIN':
@@ -550,27 +544,26 @@ func (p *MyBinlogParser) Parser() error {
 			}
 
 			if p.cfg.MaxRows > 0 && i >= p.cfg.MaxRows {
-				log.Info().Msg("已超出最大行数")
+				log.Info("已超出最大行数")
 				break
 			}
 		}
 
 		// CHECK_STOP:
 		if currentPosition.Compare(endPos) > -1 {
-			log.Warn().
-				Str("当前文件", currentPosition.Name).
-				Str("结束文件", endPos.Name).
-				Int("当前位置", int(currentPosition.Pos)).
-				Int("结束位置", int(endPos.Pos)).
-				Msg("已超出指定位置")
-			// log.Info().Msg("操作完成", currentPosition, endPos)
+			log.WithFields(log.Fields{
+				"当前文件": currentPosition.Name,
+				"结束文件": endPos.Name,
+				"当前位置": currentPosition.Pos,
+				"结束位置": endPos.Pos,
+			}).Info("已超出指定位置")
 			break
 		}
 
 		// 再次判断是否到结束位置,以免处在临界值,且无新日志时程序卡住
 		if e.Header.Timestamp > 0 {
 			if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
-				log.Warn().Msg("已超出结束时间")
+				log.Warn("已超出结束时间")
 				break
 			}
 		}
@@ -584,12 +577,12 @@ func (p *MyBinlogParser) Parser() error {
 			// * binlog文件超出指定结束文件
 			// * 超出指定结束文件和位置
 			// * 超出当前最新binlog位置
-			log.Warn().
-				Str("当前文件", currentPosition.Name).
-				Str("结束文件", p.stopFile).
-				Int("当前位置", int(currentPosition.Pos)).
-				Int("结束位置", int(p.cfg.StopPosition)).
-				Msg("已超出指定位置")
+			log.WithFields(log.Fields{
+				"当前文件": currentPosition.Name,
+				"结束文件": p.stopFile,
+				"当前位置": currentPosition.Pos,
+				"结束位置": p.cfg.StopPosition,
+			}).Info("已超出指定位置")
 			break
 		}
 
@@ -599,7 +592,7 @@ func (p *MyBinlogParser) Parser() error {
 		}
 	}
 
-	log.Info().Msg("操作完成")
+	log.Info("操作完成")
 
 	// if len(p.outputFileName) > 0 {
 	//     p.bufferWriter.Flush()
@@ -645,7 +638,7 @@ func (p *MyBinlogParser) Parser() error {
 			// 压缩完成后删除文件
 			p.clear()
 
-			log.Info().Msg("压缩完成")
+			log.Info("压缩完成")
 			kwargs = map[string]interface{}{"ok": "1", "pct": 100, "rows": i,
 				"url": "/go/download/" + strings.Replace(url, "../", "", -1), "size": filesize}
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度",
@@ -661,7 +654,7 @@ func (p *MyBinlogParser) Parser() error {
 		}
 	}
 
-	log.Info().Msg("操作结束")
+	log.Info("操作结束")
 	return nil
 }
 
@@ -669,7 +662,8 @@ func (p *MyBinlogParser) clear() {
 	// 压缩完成或者没有数据时删除文件
 	err := os.Remove(p.outputFileName)
 	if err != nil {
-		log.Error().Err(err).Str("file", p.outputFileName).Msg("文件删除失败")
+		log.Error(err)
+		log.Errorf("删除文件失败! %s", p.outputFileName)
 	}
 }
 
@@ -862,8 +856,7 @@ func (p *MyBinlogParser) ProcessChan(wg *sync.WaitGroup) {
 	for {
 		r := <-p.ch
 		if r == nil {
-			log.Info().Int("剩余ch", len(p.ch)).Int("cap ch", cap(p.ch)).Msg("通道关闭,跳出循环")
-			log.Print(len(p.outputFileName))
+			log.Info(len(p.outputFileName))
 			if len(p.outputFileName) > 0 {
 				p.bufferWriter.Flush()
 			}
@@ -906,7 +899,7 @@ func (p *MyBinlogParser) parseGtidSets() {
 			fmt.Println(*g)
 		}
 
-		log.Debug().Int("len", len(p.includeGtids)).Msg("gtid集合数量")
+		log.Debugf("gtid集合数量: %d", len(p.includeGtids))
 	}
 }
 
@@ -946,7 +939,7 @@ func (p *MyBinlogParser) parserInit() error {
 
 		// outputFile, err := os.OpenFile(outputFileStr, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 		// if err != nil {
-		//  log.Info().Msg(index, "open file failed.", err.Error())
+		//  log.Info(index, "open file failed.", err.Error())
 		//  break
 		// }
 		defer p.outputFile.Close()
@@ -974,9 +967,10 @@ func (p *MyBinlogParser) parserInit() error {
 			timestamp, err := p.getBinlogFirstTimestamp(masterLog.Name)
 			p.checkError(err)
 
-			log.Info().Str("binlogFile", masterLog.Name).
-				Str("起始时间", time.Unix(int64(timestamp), 0).Format(TimeFormat)).
-				Msg("binlog信息")
+			log.WithFields(log.Fields{
+				"起始时间":       time.Unix(int64(timestamp), 0).Format(TimeFormat),
+				"binlogFile": masterLog.Name,
+			}).Info("binlog信息")
 
 			if timestamp <= p.startTimestamp {
 				p.startFile = masterLog.Name
@@ -992,7 +986,7 @@ func (p *MyBinlogParser) parserInit() error {
 			p.checkError(errors.New("未能解析指定时间段的binlog文件,请检查后重试!"))
 		}
 
-		log.Info().Msgf("根据指定的时间段,解析出的开始binlog文件是:%s,结束文件是:%s\n",
+		log.Infof("根据指定的时间段,解析出的开始binlog文件是:%s,结束文件是:%s\n",
 			p.startFile, p.stopFile)
 	}
 
@@ -1065,7 +1059,7 @@ func (p *MyBinlogParser) getBinlogFirstTimestamp(file string) (uint32, error) {
 			return 0, err
 		}
 
-		// log.Info().Msgf("事件类型:%s", e.Header.EventType)
+		// log.Infof("事件类型:%s", e.Header.EventType)
 		if e.Header.Timestamp > 0 {
 			b.Close()
 			return e.Header.Timestamp, nil
@@ -1096,7 +1090,7 @@ func timeParseToUnix(timeStr string) (uint32, error) {
 
 func (p *MyBinlogParser) checkError(e error) {
 	if e != nil {
-		log.Error().Err(e).Msg("ERROR!!!")
+		log.Error(e)
 
 		if len(p.cfg.SocketUser) > 0 {
 			kwargs := map[string]interface{}{"error": e.Error()}
@@ -1162,15 +1156,15 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 			}
 			vv = append(vv, d)
 			// if _, ok := d.([]byte); ok {
-			//  log.Info().Msgf("%s:%q\n", t.Columns[j].ColumnName, d)
+			//  log.Infof("%s:%q\n", t.Columns[j].ColumnName, d)
 			// } else {
-			//  log.Info().Msgf("%s:%#v\n", t.Columns[j].ColumnName, d)
+			//  log.Infof("%s:%#v\n", t.Columns[j].ColumnName, d)
 			// }
 		}
 
 		r, err := InterpolateParams(sql, vv)
 		if err != nil {
-			log.Err(err)
+			log.Error(err)
 		}
 
 		p.write(r, binEvent)
@@ -1234,7 +1228,7 @@ func (p *MyBinlogParser) generateDeleteSql(t *Table, e *replication.RowsEvent,
 
 		r, err := InterpolateParams(newSql, vv)
 		if err != nil {
-			log.Err(err)
+			log.Error(err)
 		}
 
 		p.write(r, binEvent)
@@ -1316,7 +1310,7 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
 		strings.Join(sets, ","))
 
-	// log.Info().Msg(sql)
+	// log.Info(sql)
 
 	var (
 		oldValues []driver.Value
@@ -1417,7 +1411,7 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 			newValues = append(newValues, oldValues...)
 
 			newSql = strings.Join([]string{sql, strings.Join(columnNames, " AND")}, "")
-			// log.Info().Msg(newSql, len(newValues))
+			// log.Info(newSql, len(newValues))
 			r, err := InterpolateParams(newSql, newValues)
 			p.checkError(err)
 
@@ -1528,9 +1522,10 @@ func (p *MyBinlogParser) autoParseBinlogPosition() []MasterLog {
 func InterpolateParams(query string, args []driver.Value) ([]byte, error) {
 	// Number of ? should be same to len(args)
 	if strings.Count(query, "?") != len(args) {
-		log.Error().Str("sql", query).
-			Int("需要参数", strings.Count(query, "?")).
-			Int("提供参数", len(args)).Msg("sql的参数个数不匹配")
+		log.WithFields(log.Fields{
+			"需要参数": strings.Count(query, "?"),
+			"提供参数": len(args),
+		}).Error("sql的参数个数不匹配")
 
 		return nil, errors.New("driver: skip fast-path; continue as if unimplemented")
 	}
@@ -1644,20 +1639,20 @@ func InterpolateParams(query string, args []driver.Value) ([]byte, error) {
 		default:
 			// fmt.Println(v)
 			log.Printf("%T", v)
-			log.Info().Msg("解析错误")
+			log.Info("解析错误")
 			return nil, errors.New("driver: skip fast-path; continue as if unimplemented")
 		}
 
 		// 4 << 20 , 4MB
 		if len(buf)+4 > 4<<20 {
 			// log.Print("%T", v)
-			log.Info().Msg("解析错误")
+			log.Info("解析错误")
 			return nil, errors.New("driver: skip fast-path; continue as if unimplemented")
 		}
 	}
 	if argPos != len(args) {
 		// log.Print("%T", v)
-		log.Info().Msg("解析错误")
+		log.Info("解析错误")
 		return nil, errors.New("driver: skip fast-path; continue as if unimplemented")
 	}
 	return buf, nil
@@ -1847,7 +1842,7 @@ func escapeStringQuotes(buf []byte, v string) []byte {
 //         return err
 //     }
 
-//     log.Info().Msg("解析开始")
+//     log.Info("解析开始")
 
 //     cfg := new(BinlogParserConfig)
 
@@ -1865,7 +1860,7 @@ func escapeStringQuotes(buf []byte, v string) []byte {
 //     // 从第一条inception备份日志中获取远端服务器信息
 //     first := backupInfos.First()
 //     if first == nil {
-//         log.Info().Msg("未找到备份信息,操作结束")
+//         log.Info("未找到备份信息,操作结束")
 //         return errors.New("未找到备份信息,操作结束")
 //     }
 

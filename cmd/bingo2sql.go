@@ -11,9 +11,8 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	log2 "github.com/siddontang/go-log/log"
+	log "github.com/sirupsen/logrus"
 	ini "gopkg.in/ini.v1"
 )
 
@@ -27,10 +26,6 @@ var (
 	logHeader     = `${time_rfc3339} ${prefix} ${level} ${short_file} ${line} `
 	requestHeader = `${time_rfc3339} ${remote_ip} ${method} ${uri} ${status} ${error} ${latency_human}` + "\n"
 )
-
-func init() {
-	zerolog.TimeFieldFormat = "2006-01-02 15:04:05"
-}
 
 var (
 	runServer  = flagBoolean("s", false, "以服务方式运行")
@@ -77,19 +72,19 @@ func main() {
 	}
 
 	if *debug {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		log.SetLevel(log.DebugLevel)
 	} else {
-		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+		log.SetLevel(log.ErrorLevel)
 	}
 
 	// 以服务方式运行
 	if *runServer {
 		startServer()
 	} else {
-		output := zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: "2006-01-02 15:04:05"}
-		log.Logger = zerolog.New(output).With().Timestamp().Logger()
+		// output := zerolog.ConsoleWriter{
+		// 	Out:        os.Stdout,
+		// 	TimeFormat: "2006-01-02 15:04:05"}
+		// log.Logger = zerolog.New(output).With().Timestamp().Logger()
 
 		// 以独立工具运行
 		runParse()
@@ -125,13 +120,15 @@ func runParse() {
 	}
 
 	if p, err := parser.NewBinlogParser(cfg); err != nil {
-		log.Error().Err(err).Msg("binlog解析操作失败")
+		log.Error("binlog解析操作失败")
+		log.Error(err)
 		return
 	} else {
 		cfg.BeginTime = time.Now().Unix()
 		err = p.Parser()
 		if err != nil {
-			log.Error().Err(err).Msg("binlog解析操作失败")
+			log.Error("binlog解析操作失败")
+			log.Error(err)
 			return
 		}
 	}
@@ -165,11 +162,11 @@ func startServer() {
 	}
 	defer httplog.Close()
 
-	lvl, _ := zerolog.ParseLevel(level)
-	zerolog.SetGlobalLevel(lvl)
+	// lvl, _ := zerolog.ParseLevel(level)
+	// zerolog.SetGlobalLevel(lvl)
 
-	log.Logger = log.With().Caller().Logger().Output(
-		zerolog.ConsoleWriter{Out: elog, NoColor: true})
+	// log.Logger = log.With().Caller().Logger().Output(
+	// 	zerolog.ConsoleWriter{Out: elog, NoColor: true})
 
 	// log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
@@ -193,7 +190,7 @@ func startServer() {
 		middleware.LoggerConfig{Output: httplog, Format: requestHeader}))
 	e.Use(middleware.Recover())
 
-	log.Info().Msg(`parse binlog tool is started`)
+	log.Info(`parse binlog tool is started`)
 
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!\n")
@@ -230,7 +227,8 @@ func parseBinlog(c echo.Context) error {
 
 	p, err := parser.NewBinlogParser(cfg)
 	if err != nil {
-		log.Error().Err(err).Msg("binlog解析操作失败")
+		log.Error("binlog解析操作失败")
+		log.Error(err)
 		out := map[string]string{"error": err.Error()}
 		return c.JSON(http.StatusOK, out)
 	}
@@ -238,7 +236,8 @@ func parseBinlog(c echo.Context) error {
 	if err := recover(); err != nil {
 
 		if e, ok := err.(error); ok {
-			log.Error().Err(e).Msg("binlog解析操作失败")
+			log.Error("binlog解析操作失败")
+			log.Error(err)
 			out := map[string]string{"error": e.Error()}
 			return c.JSON(http.StatusOK, out)
 		} else {
@@ -313,7 +312,7 @@ func parseBinlogStop(c echo.Context) error {
 func download(c echo.Context) error {
 	path := c.Param("name")
 
-	log.Info().Str("download_path", path).Msg("下载路径")
+	log.Infof("下载路径: %s", path)
 
 	path = "../files/" + path
 
