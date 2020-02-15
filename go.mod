@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+	github.com/hanchuanchuan/go-mysql v0.0.0-20200114082439-6d0d8d3a982e
 	github.com/imroc/req v0.3.0
 	github.com/jinzhu/gorm v1.9.12
 	github.com/juju/errors v0.0.0-20190930114154-d42613fe1ab9

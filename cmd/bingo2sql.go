@@ -61,6 +61,8 @@ var (
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
 
 	output = flag.String("o", "", "output file")
+
+	debug = flagBoolean("debug", false, "调试模式,输出详细日志.sets log level to debug")
 )
 
 func main() {
@@ -72,6 +74,12 @@ func main() {
 	if *configFile == "" {
 		flag.Usage()
 		return
+	}
+
+	if *debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	} else {
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
 	}
 
 	// 以服务方式运行
