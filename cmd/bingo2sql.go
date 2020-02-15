@@ -11,7 +11,6 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
-	log2 "github.com/siddontang/go-log/log"
 	log "github.com/sirupsen/logrus"
 	ini "gopkg.in/ini.v1"
 )
@@ -71,16 +70,17 @@ func main() {
 		return
 	}
 
-	if *debug {
-		log.SetLevel(log.DebugLevel)
-	} else {
-		log.SetLevel(log.ErrorLevel)
-	}
-
 	// 以服务方式运行
 	if *runServer {
 		startServer()
 	} else {
+
+		if *debug {
+			log.SetLevel(log.DebugLevel)
+		} else {
+			log.SetLevel(log.ErrorLevel)
+		}
+
 		// output := zerolog.ConsoleWriter{
 		// 	Out:        os.Stdout,
 		// 	TimeFormat: "2006-01-02 15:04:05"}
@@ -145,7 +145,7 @@ func startServer() {
 
 	logDir := cnf.Section("Bingo").Key("log").String()
 	httpLogDir := cnf.Section("Bingo").Key("httplog").String()
-	level := cnf.Section("Bingo").Key("logLevel").String()
+	// level := cnf.Section("Bingo").Key("logLevel").String()
 
 	//echo's output log file
 	elog, err := os.OpenFile(logDir, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -169,17 +169,6 @@ func startServer() {
 	// 	zerolog.ConsoleWriter{Out: elog, NoColor: true})
 
 	// log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-
-	h, err := log2.NewStreamHandler(elog)
-	if err != nil {
-		fmt.Println(fmt.Sprintf(`open echo log file %s error: %s`, logDir, err.Error()))
-		return
-	}
-
-	l := log2.NewDefault(h)
-	log2.SetDefaultLogger(l)
-	log2.SetLevelByName(level)
-	// log2.SetLevel(log2.LevelInfo)
 
 	//new echo
 	e := echo.New()

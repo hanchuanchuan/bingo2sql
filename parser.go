@@ -169,15 +169,7 @@ type baseParser struct {
 type MyBinlogParser struct {
 	baseParser
 
-	// 记录表结构以重用
-	// allTables map[uint64]*Table
-
-	// cfg BinlogParserConfig
-
 	masterStatus *MasterStatus
-
-	// startFile string `json:"start_file" form:"start_file"`
-	// stopFile  string `json:"stop_file" form:"stop_file"`
 
 	startTimestamp uint32
 	stopTimestamp  uint32
@@ -261,6 +253,7 @@ func (p *MyBinlogParser) Parser() error {
 	if err != nil {
 		return err
 	}
+
 	defer p.db.Close()
 
 	if len(p.outputFileName) > 0 {
@@ -280,7 +273,9 @@ func (p *MyBinlogParser) Parser() error {
 		p.bufferWriter = bufio.NewWriter(p.outputFile)
 	}
 
-	endPos := mysql.Position{p.masterStatus.File, uint32(p.masterStatus.Position)}
+	// endPos := mysql.Position{
+	// 	Name: p.masterStatus.File,
+	// 	Pos:  uint32(p.masterStatus.Position)}
 
 	cfg := replication.BinlogSyncerConfig{
 		ServerID: 2000000111,
@@ -297,17 +292,19 @@ func (p *MyBinlogParser) Parser() error {
 
 	b := replication.NewBinlogSyncer(cfg)
 	defer b.Close()
-	pos := mysql.Position{p.startFile, uint32(p.cfg.StartPosition)}
 
-	s, err := b.StartSync(pos)
+	currentPosition := mysql.Position{
+		Name: p.startFile,
+		Pos:  uint32(p.cfg.StartPosition),
+	}
+
+	s, err := b.StartSync(currentPosition)
 	if err != nil {
 		log.Infof("Start sync error: %v\n", errors.ErrorStack(err))
 		return nil
 	}
 
 	i := 0
-
-	currentPosition := pos
 
 	sendTime := time.Now().Add(time.Second * 5)
 	sendCount := 0
@@ -316,7 +313,16 @@ func (p *MyBinlogParser) Parser() error {
 	wg.Add(1)
 	go p.ProcessChan(&wg)
 
+	finishFlag := -1
+
 	for {
+
+		if finishFlag > -1 {
+			// 循环已结束
+			log.Info("binlog解析完成")
+			break
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		// e, err := s.GetEvent(context.Background())
@@ -339,8 +345,9 @@ func (p *MyBinlogParser) Parser() error {
 
 		if e.Header.EventType == replication.ROTATE_EVENT {
 			if event, ok := e.Event.(*replication.RotateEvent); ok {
-				currentPosition = mysql.Position{Name: string(event.NextLogName),
-					Pos: uint32(event.Position)}
+				currentPosition = mysql.Position{
+					Name: string(event.NextLogName),
+					Pos:  uint32(event.Position)}
 			}
 		}
 
@@ -354,21 +361,9 @@ func (p *MyBinlogParser) Parser() error {
 			}
 		}
 
-		if currentPosition.Name > p.stopFile ||
-			(p.cfg.StopPosition > 0 && currentPosition.Name == p.stopFile &&
-				currentPosition.Pos > uint32(p.cfg.StopPosition)) ||
-			(currentPosition.Name == p.masterStatus.File &&
-				currentPosition.Pos > uint32(p.masterStatus.Position)) {
-			// 满足以下任一条件时结束循环
-			// * binlog文件超出指定结束文件
-			// * 超出指定结束文件和位置
-			// * 超出当前最新binlog位置
-			log.WithFields(log.Fields{
-				"当前文件": currentPosition.Name,
-				"结束文件": p.stopFile,
-				"当前位置": currentPosition.Pos,
-				"结束位置": p.cfg.StopPosition,
-			}).Info("已超出指定位置")
+		finishFlag = p.checkFinish(&currentPosition)
+		if finishFlag == 1 {
+			log.Error("is finish")
 			break
 		}
 
@@ -549,17 +544,6 @@ func (p *MyBinlogParser) Parser() error {
 			}
 		}
 
-		// CHECK_STOP:
-		if currentPosition.Compare(endPos) > -1 {
-			log.WithFields(log.Fields{
-				"当前文件": currentPosition.Name,
-				"结束文件": endPos.Name,
-				"当前位置": currentPosition.Pos,
-				"结束位置": endPos.Pos,
-			}).Info("已超出指定位置")
-			break
-		}
-
 		// 再次判断是否到结束位置,以免处在临界值,且无新日志时程序卡住
 		if e.Header.Timestamp > 0 {
 			if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
@@ -568,35 +552,13 @@ func (p *MyBinlogParser) Parser() error {
 			}
 		}
 
-		if currentPosition.Name > p.stopFile ||
-			(p.cfg.StopPosition > 0 && currentPosition.Name == p.stopFile &&
-				currentPosition.Pos >= uint32(p.cfg.StopPosition)) ||
-			(currentPosition.Name == p.masterStatus.File &&
-				currentPosition.Pos >= uint32(p.masterStatus.Position)) {
-			// 满足以下任一条件时结束循环
-			// * binlog文件超出指定结束文件
-			// * 超出指定结束文件和位置
-			// * 超出当前最新binlog位置
-			log.WithFields(log.Fields{
-				"当前文件": currentPosition.Name,
-				"结束文件": p.stopFile,
-				"当前位置": currentPosition.Pos,
-				"结束位置": p.cfg.StopPosition,
-			}).Info("已超出指定位置")
-			break
-		}
-
 		if !p.running {
-			fmt.Println("进程手动中止")
+			log.Warn("进程手动中止")
 			break
 		}
 	}
 
 	log.Info("操作完成")
-
-	// if len(p.outputFileName) > 0 {
-	//     p.bufferWriter.Flush()
-	// }
 
 	close(p.ch)
 
@@ -606,7 +568,6 @@ func (p *MyBinlogParser) Parser() error {
 		p.outputFile.Close()
 
 		if i > 0 {
-
 			kwargs := map[string]interface{}{"rows": i}
 			kwargs["pct"] = 99
 
@@ -656,6 +617,58 @@ func (p *MyBinlogParser) Parser() error {
 
 	log.Info("操作结束")
 	return nil
+}
+
+// isFinish 检查是否需要结束循环
+func (p *MyBinlogParser) checkFinish(currentPosition *mysql.Position) int {
+	returnValue := -1
+	// 满足以下任一条件时结束循环
+	// * binlog文件超出指定结束文件
+	// * 超出指定结束文件的指定位置
+	// * 超出当前最新binlog位置
+
+	// 当前binlog解析位置 相对于配置的结束位置/最新位置
+	// 超出时返回 1
+	// 等于时返回 0
+	// 小于时返回 -1
+
+	// 根据是否为事件开始做不同判断
+	// 事件开始时做大于判断
+	// 事件结束时做等于判断
+	var stopMsg string
+	if p.stopFile != "" && currentPosition.Name > p.stopFile {
+		stopMsg = "超出指定结束文件"
+		returnValue = 1
+	} else if p.cfg.StopPosition > 0 && currentPosition.Name == p.stopFile {
+		if currentPosition.Pos > uint32(p.cfg.StopPosition) {
+			stopMsg = "超出指定位置"
+			returnValue = 1
+		} else if currentPosition.Pos == uint32(p.cfg.StopPosition) {
+			stopMsg = "超出指定位置"
+			returnValue = 0
+		}
+	}
+
+	if currentPosition.Name > p.masterStatus.File ||
+		currentPosition.Name == p.masterStatus.File &&
+			currentPosition.Pos > uint32(p.masterStatus.Position) {
+		stopMsg = "超出最新binlog位置"
+		returnValue = 1
+	} else if currentPosition.Name == p.masterStatus.File &&
+		currentPosition.Pos == uint32(p.masterStatus.Position) {
+		stopMsg = "超出最新binlog位置"
+		returnValue = 0
+	}
+
+	if stopMsg != "" {
+		log.WithFields(log.Fields{
+			"当前文件": currentPosition.Name,
+			"结束文件": p.stopFile,
+			"当前位置": currentPosition.Pos,
+			"结束位置": p.cfg.StopPosition,
+		}).Info("已超出指定位置")
+	}
+	return returnValue
 }
 
 func (p *MyBinlogParser) clear() {
@@ -796,11 +809,11 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	}
 	defer p.db.Close()
 
-	if len(p.cfg.StartTime) == 0 {
-		if len(p.startFile) == 0 {
-			return nil, errors.New("未指定binlog解析起点")
-		}
-	}
+	// if len(p.cfg.StartTime) == 0 {
+	// 	if len(p.startFile) == 0 {
+	// 		return nil, errors.New("未指定binlog解析起点")
+	// 	}
+	// }
 
 	p.parseGtidSets()
 
@@ -856,7 +869,6 @@ func (p *MyBinlogParser) ProcessChan(wg *sync.WaitGroup) {
 	for {
 		r := <-p.ch
 		if r == nil {
-			log.Info(len(p.outputFileName))
 			if len(p.outputFileName) > 0 {
 				p.bufferWriter.Flush()
 			}
@@ -919,6 +931,7 @@ func (p *baseParser) getDB() (*gorm.DB, error) {
 	return gorm.Open("mysql", addr)
 }
 
+// parserInit 解析服务初始化
 func (p *MyBinlogParser) parserInit() error {
 
 	defer timeTrack(time.Now(), "parserInit")
@@ -960,25 +973,30 @@ func (p *MyBinlogParser) parserInit() error {
 	if len(p.startFile) == 0 {
 
 		binlogIndex := p.autoParseBinlogPosition()
+		if len(binlogIndex) == 0 {
+			p.checkError(errors.New("无法获取master binlog"))
+		}
 
 		p.startFile = binlogIndex[0].Name
 
-		for _, masterLog := range binlogIndex {
-			timestamp, err := p.getBinlogFirstTimestamp(masterLog.Name)
-			p.checkError(err)
+		if p.startTimestamp > 0 || p.stopTimestamp > 0 {
+			for _, masterLog := range binlogIndex {
+				timestamp, err := p.getBinlogFirstTimestamp(masterLog.Name)
+				p.checkError(err)
 
-			log.WithFields(log.Fields{
-				"起始时间":       time.Unix(int64(timestamp), 0).Format(TimeFormat),
-				"binlogFile": masterLog.Name,
-			}).Info("binlog信息")
+				log.WithFields(log.Fields{
+					"起始时间":       time.Unix(int64(timestamp), 0).Format(TimeFormat),
+					"binlogFile": masterLog.Name,
+				}).Info("binlog信息")
 
-			if timestamp <= p.startTimestamp {
-				p.startFile = masterLog.Name
-			}
+				if timestamp <= p.startTimestamp {
+					p.startFile = masterLog.Name
+				}
 
-			if p.stopTimestamp > 0 && timestamp <= p.stopTimestamp {
-				p.stopFile = masterLog.Name
-				break
+				if p.stopTimestamp > 0 && timestamp <= p.stopTimestamp {
+					p.stopFile = masterLog.Name
+					break
+				}
 			}
 		}
 
@@ -990,9 +1008,10 @@ func (p *MyBinlogParser) parserInit() error {
 			p.startFile, p.stopFile)
 	}
 
-	if len(p.stopFile) == 0 {
-		p.stopFile = p.startFile
-	}
+	// // 未指定结束文件时,仅解析该文件
+	// if len(p.stopFile) == 0 {
+	// 	p.stopFile = p.startFile
+	// }
 
 	p.cfg.OnlyDatabases = make(map[string]bool)
 	p.cfg.OnlyTables = make(map[string]bool)
@@ -1028,7 +1047,15 @@ func Exists(filename string) bool {
 	return err == nil || os.IsExist(err)
 }
 
+// getBinlogFirstTimestamp 获取binlog文件第一个时间戳
 func (p *MyBinlogParser) getBinlogFirstTimestamp(file string) (uint32, error) {
+
+	logLevel := log.GetLevel()
+	defer func() {
+		log.SetLevel(logLevel)
+	}()
+	// 临时调整日志级别,忽略close sync异常
+	log.SetLevel(log.FatalLevel)
 
 	cfg := replication.BinlogSyncerConfig{
 		ServerID: 2000000110,
@@ -1044,32 +1071,34 @@ func (p *MyBinlogParser) getBinlogFirstTimestamp(file string) (uint32, error) {
 
 	b := replication.NewBinlogSyncer(cfg)
 
-	pos := mysql.Position{file, uint32(4)}
+	pos := mysql.Position{Name: file,
+		Pos: uint32(4)}
 
 	s, err := b.StartSync(pos)
 	if err != nil {
 		return 0, err
 	}
 
+	defer func() {
+		b.Close()
+	}()
 	for {
 		// return
 		e, err := s.GetEvent(context.Background())
 		if err != nil {
-			b.Close()
+			// b.Close()
 			return 0, err
 		}
 
 		// log.Infof("事件类型:%s", e.Header.EventType)
 		if e.Header.Timestamp > 0 {
-			b.Close()
+			// b.Close()
 			return e.Header.Timestamp, nil
 		}
 	}
-
-	return 0, nil
 }
 
-// 读取文件的函数调用大多数都需要检查错误，
+// check 读取文件的函数调用大多数都需要检查错误，
 // 使用下面这个错误检查方法可以方便一点
 func check(e error) {
 	if e != nil {
