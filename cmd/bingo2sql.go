@@ -59,6 +59,8 @@ var (
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
 
 	stopNever = flagBoolean("stop-never", "", false, "持续解析binlog")
+
+	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选. 默认False")
 )
 
 func main() {
@@ -119,6 +121,8 @@ func runParse() {
 		MaxRows:   *maxRows,
 
 		OutputFileStr: *output,
+
+		RemovePrimary: *removePrimary,
 	}
 
 	if p, err := parser.NewBinlogParser(cfg); err != nil {

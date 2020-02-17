@@ -127,6 +127,9 @@ type BinlogParserConfig struct {
 	ThreadID uint32 `json:"thread_id" form:"thread_id"`
 
 	IncludeGtids string `json:"include_gtids" form:"include_gtids"`
+
+	// 对INSERT语句去除主键,以便于使用. 默认为false
+	RemovePrimary bool
 }
 
 type Parser interface {
@@ -1165,12 +1168,18 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 	template := "INSERT INTO `%s`.`%s`(%s) VALUES(%s)"
 	for i, col := range t.Columns {
 		if i < int(e.ColumnCount) {
-
-			columnNames = append(columnNames, fmt.Sprintf(c, col.ColumnName))
+			//  有主键且设置去除主键时 作特殊处理
+			if t.hasPrimary && p.cfg.RemovePrimary {
+				if _, ok := t.primarys[i]; !ok {
+					columnNames = append(columnNames, fmt.Sprintf(c, col.ColumnName))
+				}
+			} else {
+				columnNames = append(columnNames, fmt.Sprintf(c, col.ColumnName))
+			}
 		}
 	}
 
-	paramValues := strings.Repeat("?,", int(e.ColumnCount))
+	paramValues := strings.Repeat("?,", len(columnNames))
 	paramValues = strings.TrimRight(paramValues, ",")
 
 	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
@@ -1180,15 +1189,16 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 
 		var vv []driver.Value
 		for i, d := range rows {
+			if t.hasPrimary && p.cfg.RemovePrimary {
+				if _, ok := t.primarys[i]; ok {
+					continue
+				}
+			}
+
 			if t.Columns[i].IsUnsigned() {
 				d = processValue(d, GetDataTypeBase(t.Columns[i].ColumnType))
 			}
 			vv = append(vv, d)
-			// if _, ok := d.([]byte); ok {
-			//  log.Infof("%s:%q\n", t.Columns[j].ColumnName, d)
-			// } else {
-			//  log.Infof("%s:%#v\n", t.Columns[j].ColumnName, d)
-			// }
 		}
 
 		r, err := InterpolateParams(sql, vv)
