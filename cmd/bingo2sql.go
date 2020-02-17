@@ -11,19 +11,16 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	log "github.com/sirupsen/logrus"
-	flag "github.com/spf13/pflag"
+	"github.com/spf13/pflag"
 	ini "gopkg.in/ini.v1"
 )
 
 var parserProcess map[string]*parser.MyBinlogParser
 
-func init() {
-
-}
-
 var (
 	logHeader     = `${time_rfc3339} ${prefix} ${level} ${short_file} ${line} `
 	requestHeader = `${time_rfc3339} ${remote_ip} ${method} ${uri} ${status} ${error} ${latency_human}` + "\n"
+	flag          = pflag.NewFlagSet("bingo2sql", pflag.ExitOnError)
 )
 
 var (
@@ -38,19 +35,20 @@ var (
 	startFile = flag.String("start-file", "", "start-file")
 	stopFile  = flag.String("stop-file", "", "stop-file")
 
+	startPosition = flag.Int("start-pos", 0, "start-pos")
+	stopPosition  = flag.Int("stop-pos", 0, "stop-pos")
+
 	startTime = flag.String("start-time", "", "start-time")
 	stopTime  = flag.String("stop-time", "", "stop-time")
 
-	startPosition = flag.Int("start-pos", 0, "start-pos")
-	stopPosition  = flag.Int("stop-pos", 0, "stop-pos")
+	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
+	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
 
 	flashback = flagBoolean("flashback", "f", false, "逆向语句")
 
 	parseDDL = flagBoolean("ddl", "", false, "解析DDL语句(仅正向SQL)")
 
-	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
-	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
-	sqlType   = flag.String("type", "insert,delete,update", "解析的语句类型")
+	sqlType = flag.String("type", "insert,delete,update", "解析的语句类型")
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
 
@@ -65,7 +63,18 @@ var (
 
 func main() {
 
-	flag.Parse()
+	flag.SortFlags = false
+
+	if err := flag.Parse(os.Args[1:]); err != nil {
+		log.Error(err)
+		return
+	}
+
+	if len(os.Args) < 2 {
+		fmt.Fprint(os.Stderr, "Usage of bingo2sql:\n")
+		flag.PrintDefaults()
+		return
+	}
 
 	parserProcess = make(map[string]*parser.MyBinlogParser)
 
