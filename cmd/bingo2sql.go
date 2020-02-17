@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	log "github.com/sirupsen/logrus"
+	flag "github.com/spf13/pflag"
 	ini "gopkg.in/ini.v1"
 )
 
@@ -27,13 +27,13 @@ var (
 )
 
 var (
-	runServer  = flagBoolean("s", false, "以服务方式运行")
-	configFile = flag.String("c", "config.ini", "bingo2sql config file")
+	runServer  = flagBoolean("server", "s", false, "以服务方式运行")
+	configFile = flag.StringP("config", "c", "config.ini", "bingo2sql config file")
 
-	host     = flag.String("h", "", "host")
-	port     = flag.Int("P", 0, "host")
-	user     = flag.String("u", "", "user")
-	password = flag.String("p", "", "password")
+	host     = flag.StringP("host", "h", "", "host")
+	port     = flag.IntP("port", "P", 3306, "host")
+	user     = flag.StringP("user", "u", "", "user")
+	password = flag.StringP("password", "p", "", "password")
 
 	startFile = flag.String("start-file", "", "start-file")
 	stopFile  = flag.String("stop-file", "", "stop-file")
@@ -44,19 +44,21 @@ var (
 	startPosition = flag.Int("start-pos", 0, "start-pos")
 	stopPosition  = flag.Int("stop-pos", 0, "stop-pos")
 
-	flashback = flagBoolean("f", false, "逆向语句")
+	flashback = flagBoolean("flashback", "f", false, "逆向语句")
 
-	parseDDL = flagBoolean("ddl", false, "解析DDL语句(仅正向SQL)")
+	parseDDL = flagBoolean("ddl", "", false, "解析DDL语句(仅正向SQL)")
 
-	databases = flag.String("db", "", "数据库列表,多个时以逗号分隔")
-	tables    = flag.String("t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
+	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
+	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
 	sqlType   = flag.String("type", "insert,delete,update", "解析的语句类型")
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
 
-	output = flag.String("o", "", "output file")
+	output = flag.String("output", "", "output file")
 
-	debug = flagBoolean("debug", false, "调试模式,输出详细日志.sets log level to debug")
+	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
+
+	stopNever = flagBoolean("stop-never", "", false, "持续解析binlog")
 )
 
 func main() {
@@ -318,11 +320,11 @@ func download(c echo.Context) error {
 	// return c.File(path)
 }
 
-func flagBoolean(name string, defaultVal bool, usage string) *bool {
+func flagBoolean(name string, shorthand string, defaultVal bool, usage string) *bool {
 	if defaultVal == false {
 		// Fix #4125, golang do not print default false value in usage, so we append it.
 		usage = fmt.Sprintf("%s (default false)", usage)
-		return flag.Bool(name, defaultVal, usage)
+		return flag.BoolP(name, shorthand, defaultVal, usage)
 	}
-	return flag.Bool(name, defaultVal, usage)
+	return flag.BoolP(name, shorthand, defaultVal, usage)
 }
