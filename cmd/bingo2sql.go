@@ -44,7 +44,7 @@ var (
 	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
 	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
 
-	flashback = flagBoolean("flashback", "f", false, "逆向语句")
+	flashback = flagBoolean("flashback", "B", false, "逆向语句")
 
 	parseDDL = flagBoolean("ddl", "", false, "解析DDL语句(仅正向SQL)")
 
@@ -56,7 +56,7 @@ var (
 
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
 
-	stopNever = flagBoolean("stop-never", "", false, "持续解析binlog")
+	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
 
 	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选. 默认False")
 )
@@ -132,6 +132,8 @@ func runParse() {
 		OutputFileStr: *output,
 
 		RemovePrimary: *removePrimary,
+
+		StopNever: *stopNever,
 	}
 
 	if p, err := parser.NewBinlogParser(cfg); err != nil {

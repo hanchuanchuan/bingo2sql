@@ -130,6 +130,8 @@ type BinlogParserConfig struct {
 
 	// 对INSERT语句去除主键,以便于使用. 默认为false
 	RemovePrimary bool
+	// 持续解析binlog
+	StopNever bool
 }
 
 type Parser interface {
@@ -317,17 +319,22 @@ func (p *MyBinlogParser) Parser() error {
 	go p.ProcessChan(&wg)
 
 	finishFlag := -1
-
+	var ctx context.Context
+	var cancel context.CancelFunc
 	for {
 
-		if finishFlag > -1 {
+		if !p.cfg.StopNever && finishFlag > -1 {
 			// 循环已结束
 			log.Info("binlog解析完成")
 			break
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		if p.cfg.StopNever {
+			ctx = context.Background()
+		} else {
+			ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+		}
 		// e, err := s.GetEvent(context.Background())
 		e, err := s.GetEvent(ctx)
 		if err != nil {
@@ -338,7 +345,7 @@ func (p *MyBinlogParser) Parser() error {
 			//  log.Info("===============")
 			//  log.Info(e.Header.EventType)
 			// }
-			log.Infof("Get event error: %v\n", errors.ErrorStack(err))
+			log.Errorf("Get event error: %v\n", errors.ErrorStack(err))
 			break
 		}
 
@@ -354,20 +361,22 @@ func (p *MyBinlogParser) Parser() error {
 			}
 		}
 
-		if e.Header.Timestamp > 0 {
-			if p.startTimestamp > 0 && e.Header.Timestamp < p.startTimestamp {
-				continue // goto CHECK_STOP
+		if !p.cfg.StopNever {
+			if e.Header.Timestamp > 0 {
+				if p.startTimestamp > 0 && e.Header.Timestamp < p.startTimestamp {
+					continue // goto CHECK_STOP
+				}
+				if p.stopTimestamp > 0 && e.Header.Timestamp > p.stopTimestamp {
+					log.Warn("已超出结束时间")
+					break
+				}
 			}
-			if p.stopTimestamp > 0 && e.Header.Timestamp > p.stopTimestamp {
-				log.Warn("已超出结束时间")
+
+			finishFlag = p.checkFinish(&currentPosition)
+			if finishFlag == 1 {
+				log.Error("is finish")
 				break
 			}
-		}
-
-		finishFlag = p.checkFinish(&currentPosition)
-		if finishFlag == 1 {
-			log.Error("is finish")
-			break
 		}
 
 		if e.Header.EventType == replication.GTID_EVENT {
@@ -396,7 +405,10 @@ func (p *MyBinlogParser) Parser() error {
 				continue // goto CHECK_STOP
 			} else if status == 2 {
 				log.Info("已超出GTID范围,自动结束")
-				break
+
+				if !p.cfg.StopNever {
+					break
+				}
 			}
 		}
 
@@ -543,7 +555,10 @@ func (p *MyBinlogParser) Parser() error {
 
 			if p.cfg.MaxRows > 0 && i >= p.cfg.MaxRows {
 				log.Info("已超出最大行数")
-				break
+
+				if !p.cfg.StopNever {
+					break
+				}
 			}
 		}
 
@@ -551,7 +566,9 @@ func (p *MyBinlogParser) Parser() error {
 		if e.Header.Timestamp > 0 {
 			if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
 				log.Warn("已超出结束时间")
-				break
+				if !p.cfg.StopNever {
+					break
+				}
 			}
 		}
 
