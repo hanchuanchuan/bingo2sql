@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"reflect"
@@ -26,6 +27,10 @@ import (
 	uuid "github.com/satori/go.uuid"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/hanchuanchuan/goInception/ast"
+	tidb "github.com/hanchuanchuan/goInception/mysql"
+	tidbParser "github.com/hanchuanchuan/goInception/parser"
 )
 
 const digits01 = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
@@ -51,7 +56,12 @@ func (f *Column) IsUnsigned() bool {
 }
 
 type Table struct {
-	tableId    uint64
+	tableId uint64
+
+	// 仅本地解析使用
+	TableName string
+	Schema    string
+
 	Columns    []Column
 	hasPrimary bool
 	primarys   map[int]bool
@@ -169,6 +179,9 @@ type baseParser struct {
 
 	// gtid []byte
 	// write interface{}
+
+	// 本地解析模式.指定binlog文件和表结构本地解析
+	localMode bool
 }
 
 type MyBinlogParser struct {
@@ -200,6 +213,9 @@ type MyBinlogParser struct {
 	includeGtids []*GtidSetInfo
 
 	jumpGtids map[*GtidSetInfo]bool
+
+	// 表结构缓存(仅用于本地解析)
+	tableCacheList map[string]*Table
 }
 
 var (
@@ -230,6 +246,17 @@ func (cfg *BinlogParserConfig) Id() string {
 }
 
 func (p *MyBinlogParser) Parser() error {
+
+	if p.cfg.Host == "" && p.cfg.StartFile != "" {
+		_, err := os.Stat(p.cfg.StartFile)
+		if err != nil {
+			return err
+		}
+		// if s.IsDir(){
+
+		// }
+		return p.parserFile()
+	}
 
 	var wg sync.WaitGroup
 
@@ -669,15 +696,17 @@ func (p *MyBinlogParser) checkFinish(currentPosition *mysql.Position) int {
 		}
 	}
 
-	if currentPosition.Name > p.masterStatus.File ||
-		currentPosition.Name == p.masterStatus.File &&
-			currentPosition.Pos > uint32(p.masterStatus.Position) {
-		stopMsg = "超出最新binlog位置"
-		returnValue = 1
-	} else if currentPosition.Name == p.masterStatus.File &&
-		currentPosition.Pos == uint32(p.masterStatus.Position) {
-		stopMsg = "超出最新binlog位置"
-		returnValue = 0
+	if p.masterStatus != nil {
+		if currentPosition.Name > p.masterStatus.File ||
+			currentPosition.Name == p.masterStatus.File &&
+				currentPosition.Pos > uint32(p.masterStatus.Position) {
+			stopMsg = "超出最新binlog位置"
+			returnValue = 1
+		} else if currentPosition.Name == p.masterStatus.File &&
+			currentPosition.Pos == uint32(p.masterStatus.Position) {
+			stopMsg = "超出最新binlog位置"
+			returnValue = 0
+		}
 	}
 
 	if stopMsg != "" {
@@ -816,24 +845,16 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 
 	p.allTables = make(map[uint64]*Table)
 	p.jumpGtids = make(map[*GtidSetInfo]bool)
+	p.ch = make(chan *row, 50)
 
+	p.write1 = p
 	p.cfg = cfg
+	p.cfg.OnlyDatabases = make(map[string]bool)
+	p.cfg.OnlyTables = make(map[string]bool)
+	p.cfg.SqlTypes = make(map[string]bool)
 
 	p.startFile = cfg.StartFile
 	p.stopFile = cfg.StopFile
-
-	var err error
-	p.db, err = p.getDB()
-	if err != nil {
-		return nil, err
-	}
-	defer p.db.Close()
-
-	// if len(p.cfg.StartTime) == 0 {
-	// 	if len(p.startFile) == 0 {
-	// 		return nil, errors.New("未指定binlog解析起点")
-	// 	}
-	// }
 
 	p.parseGtidSets()
 
@@ -864,23 +885,44 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 		}
 	}
 
-	err = p.parserInit()
-	if err != nil {
+	// 本地解析模式,host为空,表名为SQL文件
+	if p.cfg.Host == "" {
+		if p.cfg.Tables == "" {
+			return nil, fmt.Errorf("本地解析模式请指定表结构文件--tables")
+		}
+		_, err := os.Stat(p.cfg.Tables)
+		if err != nil {
+			return nil, fmt.Errorf("读取表结构文件失败(%s): %v", p.cfg.Tables, err)
+		}
+
+		if err := p.readTableSchema(p.cfg.Tables); err != nil {
+			return nil, fmt.Errorf("读取表结构文件失败(%s): %v", p.cfg.Tables, err)
+		}
+
+		p.localMode = true
+	}
+
+	if !p.localMode {
+		var err error
+		p.db, err = p.getDB()
+		if err != nil {
+			return nil, err
+		}
+		defer p.db.Close()
+
+		p.masterStatus, err = p.mysqlMasterStatus()
+		if err != nil {
+			return nil, err
+		}
+
+		if p.cfg.Debug {
+			p.db.LogMode(true)
+		}
+	}
+
+	if err := p.parserInit(); err != nil {
 		return nil, err
 	}
-
-	if p.cfg.Debug {
-		p.db.LogMode(true)
-	}
-
-	p.masterStatus, err = p.mysqlMasterStatus()
-	if err != nil {
-		return nil, err
-	}
-
-	p.write1 = p
-
-	p.ch = make(chan *row, 50)
 
 	return p, nil
 }
@@ -899,6 +941,7 @@ func (p *MyBinlogParser) ProcessChan(wg *sync.WaitGroup) {
 	}
 }
 
+// parseGtidSets 解析gtid集合
 func (p *MyBinlogParser) parseGtidSets() {
 	if len(p.cfg.IncludeGtids) > 0 {
 
@@ -1033,10 +1076,6 @@ func (p *MyBinlogParser) parserInit() error {
 	// 	p.stopFile = p.startFile
 	// }
 
-	p.cfg.OnlyDatabases = make(map[string]bool)
-	p.cfg.OnlyTables = make(map[string]bool)
-	p.cfg.SqlTypes = make(map[string]bool)
-
 	if len(p.cfg.SqlType) > 0 {
 		for _, s := range strings.Split(p.cfg.SqlType, ",") {
 			p.cfg.SqlTypes[s] = true
@@ -1163,7 +1202,7 @@ func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
 		}
 	}
 	if len(p.cfg.OnlyTables) > 0 {
-		_, ok := (p.cfg.OnlyTables)[string(table.Table)]
+		_, ok := (p.cfg.OnlyTables)[strings.ToLower(string(table.Table))]
 		if !ok {
 			return false
 		}
@@ -1482,11 +1521,26 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 	return string(buf), nil
 }
 
-func (p *baseParser) tableInformation(tableId uint64, schema []byte, tableName []byte) (*Table, error) {
+func (p *MyBinlogParser) tableInformation(tableId uint64, schema []byte, tableName []byte) (*Table, error) {
 
 	table, ok := p.allTables[tableId]
 	if ok {
 		return table, nil
+	}
+
+	if p.localMode && len(p.tableCacheList) > 0 {
+		key := strings.ToLower(fmt.Sprintf("%s.%s", string(schema), string(tableName)))
+		if table, ok := p.tableCacheList[key]; ok {
+			p.allTables[tableId] = table
+			return table, nil
+		} else {
+			key = strings.ToLower(string(tableName))
+			if table, ok := p.tableCacheList[key]; ok {
+				p.allTables[tableId] = table
+				return table, nil
+			}
+		}
+		return nil, nil
 	}
 
 	sql := `SELECT COLUMN_NAME, ifnull(COLLATION_NAME,'') as COLLATION_NAME,
@@ -1957,4 +2011,119 @@ func GetDataTypeBase(dataType string) string {
 	}
 
 	return dataType
+}
+
+func (p *MyBinlogParser) readTableSchema(path string) error {
+	fileObj, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	defer fileObj.Close()
+	//一个文件对象本身是实现了io.Reader的 使用bufio.NewReader去初始化一个Reader对象，存在buffer中的，读取一次就会被清空
+	reader := bufio.NewReader(fileObj)
+
+	p.tableCacheList = make(map[string]*Table)
+
+	var buf []string
+	quotaIsDouble := true
+	parser := tidbParser.New()
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err != io.EOF {
+				log.Println(err)
+				break
+			}
+		}
+
+		if strings.Count(line, "'")%2 == 1 {
+			quotaIsDouble = !quotaIsDouble
+		}
+
+		if ((strings.HasSuffix(line, ";") || strings.HasSuffix(line, ";\r")) &&
+			quotaIsDouble) || err == io.EOF {
+			buf = append(buf, line)
+			s1 := strings.Join(buf, "\n")
+			s1 = strings.TrimRight(s1, ";")
+			buf = nil
+			stmtNodes, _, err := parser.Parse(s1, "utf8mb4", "utf8mb4_bin")
+			if err != nil {
+				return fmt.Errorf("解析失败: %v", err)
+			}
+
+			for _, stmtNode := range stmtNodes {
+				//  是ASCII码160的特殊空格
+				// currentSql := strings.Trim(stmtNode.Text(), " ;\t\n\v\f\r ")
+				switch node := stmtNode.(type) {
+				case *ast.CreateTableStmt:
+					p.cacheNewTable(buildTableInfo(node))
+				}
+			}
+		} else {
+			buf = append(buf, line)
+		}
+
+		if err == io.EOF {
+			break
+		}
+	}
+	return nil
+}
+
+func (p *MyBinlogParser) cacheNewTable(t *Table) {
+
+	var key string
+	if t.Schema == "" {
+		key = t.TableName
+	} else {
+		key = fmt.Sprintf("%s.%s", t.Schema, t.TableName)
+	}
+
+	key = strings.ToLower(key)
+
+	p.cfg.OnlyTables[strings.ToLower(t.TableName)] = true
+	p.tableCacheList[key] = t
+}
+
+func buildTableInfo(node *ast.CreateTableStmt) *Table {
+	table := &Table{
+		Schema:    node.Table.Schema.String(),
+		TableName: node.Table.Name.String(),
+	}
+
+	table.Columns = make([]Column, 0, len(node.Cols))
+	for _, field := range node.Cols {
+		table.Columns = append(table.Columns, *buildNewColumnToCache(table, field))
+	}
+
+	return table
+}
+
+func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
+	c := &Column{}
+
+	c.ColumnName = field.Name.Name.String()
+	c.ColumnType = field.Tp.InfoSchemaStr()
+
+	for _, op := range field.Options {
+		switch op.Tp {
+		case ast.ColumnOptionComment:
+			c.ColumnComment = op.Expr.GetDatum().GetString()
+
+		case ast.ColumnOptionPrimaryKey:
+			c.ColumnKey = "PRI"
+		case ast.ColumnOptionUniqKey:
+			c.ColumnKey = "UNI"
+		case ast.ColumnOptionAutoIncrement:
+			// c.Extra += "auto_increment"
+		}
+	}
+
+	if c.ColumnKey != "PRI" && tidb.HasPriKeyFlag(field.Tp.Flag) {
+		c.ColumnKey = "PRI"
+	} else if tidb.HasUniKeyFlag(field.Tp.Flag) {
+		c.ColumnKey = "UNI"
+	}
+	return c
 }
