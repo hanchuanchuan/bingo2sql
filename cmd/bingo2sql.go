@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"time"
@@ -43,6 +44,8 @@ var (
 
 	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
 	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
+
+	threadID = flag.Uint64P("connection-id", "C", 0, "指定线程ID")
 
 	flashback = flagBoolean("flashback", "B", false, "逆向语句")
 
@@ -108,6 +111,7 @@ func main() {
 
 // runParse 执行binlog解析
 func runParse() {
+
 	cfg := &parser.BinlogParserConfig{
 		Host:     *host,
 		Port:     uint16(*port),
@@ -137,6 +141,13 @@ func runParse() {
 		MinimalUpdate: *minimalUpdate,
 
 		StopNever: *stopNever,
+	}
+
+	// thread_id溢出处理
+	if *threadID > math.MaxUint32 {
+		cfg.ThreadID = uint32(*threadID % (1 << 32))
+	} else {
+		cfg.ThreadID = uint32(*threadID)
 	}
 
 	if p, err := parser.NewBinlogParser(cfg); err != nil {

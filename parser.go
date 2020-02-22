@@ -338,7 +338,7 @@ func (p *MyBinlogParser) Parser() error {
 		return nil
 	}
 
-	i := 0
+	changeRows := 0
 
 	sendTime := time.Now().Add(time.Second * 5)
 	sendCount := 0
@@ -408,196 +408,139 @@ func (p *MyBinlogParser) Parser() error {
 			}
 		}
 
-		if e.Header.EventType == replication.GTID_EVENT {
-			if event, ok := e.Event.(*replication.GTIDEvent); ok {
-
-				if len(p.includeGtids) > 0 {
-					p.gtidEvent = event
-				}
-
-				// e.Dump(os.Stdout)
-				u, _ := uuid.FromBytes(event.SID)
-				p.gtid = append([]byte(u.String()), []byte(fmt.Sprintf(":%d", event.GNO))...)
-				// fmt.Println(p.gtid)
-			}
-		}
-
-		if (e.Header.EventType == replication.TABLE_MAP_EVENT ||
-			e.Header.EventType == replication.QUERY_EVENT ||
-			e.Header.EventType == replication.UPDATE_ROWS_EVENTv2 ||
-			e.Header.EventType == replication.WRITE_ROWS_EVENTv2 ||
-			e.Header.EventType == replication.DELETE_ROWS_EVENTv2) &&
-			len(p.includeGtids) > 0 {
-
-			status := p.isGtidEventInGtidSet()
-			if status == 1 {
-				continue // goto CHECK_STOP
-			} else if status == 2 {
-				log.Info("已超出GTID范围,自动结束")
-
-				if !p.cfg.StopNever {
-					break
-				}
-			}
-		}
-
-		if e.Header.EventType == replication.TABLE_MAP_EVENT {
-			if event, ok := e.Event.(*replication.TableMapEvent); ok {
-				if !p.schemaFilter(event) {
+		// 只需解析GTID返回内的event
+		if len(p.includeGtids) > 0 {
+			switch e.Header.EventType {
+			case replication.TABLE_MAP_EVENT, replication.QUERY_EVENT,
+				replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2,
+				replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2,
+				replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
+				status := p.isGtidEventInGtidSet()
+				if status == 1 {
 					continue // goto CHECK_STOP
-				}
+				} else if status == 2 {
+					log.Info("已超出GTID范围,自动结束")
 
-				_, err = p.tableInformation(event.TableID, event.Schema, event.Table)
-				if err != nil {
-					return err
+					if !p.cfg.StopNever {
+						break
+					}
 				}
 			}
-		} else if e.Header.EventType == replication.QUERY_EVENT {
+		}
+
+		switch event := e.Event.(type) {
+		case *replication.GTIDEvent:
+			if len(p.includeGtids) > 0 {
+				p.gtidEvent = event
+			}
+			// e.Dump(os.Stdout)
+			u, _ := uuid.FromBytes(event.SID)
+			p.gtid = append([]byte(u.String()), []byte(fmt.Sprintf(":%d", event.GNO))...)
+			// fmt.Println(p.gtid)
+		case *replication.TableMapEvent:
+			if !p.schemaFilter(event) {
+				continue
+			}
+			_, err = p.tableInformation(event.TableID, event.Schema, event.Table)
+			if err != nil {
+				return err
+			}
+		case *replication.QueryEvent:
+			if p.cfg.ThreadID > 0 {
+				currentThreadID = event.SlaveProxyID
+			}
+
 			// 回滚或者仅dml语句时 跳过
-			if (p.cfg.Flashback || !p.cfg.ParseDDL) && p.cfg.ThreadID == 0 {
+			if p.cfg.Flashback || !p.cfg.ParseDDL {
 				continue // goto CHECK_STOP
 			}
 
-			if event, ok := e.Event.(*replication.QueryEvent); ok {
-				if p.cfg.ThreadID > 0 {
-					currentThreadID = event.SlaveProxyID
+			if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
+				continue // goto CHECK_STOP
+			}
+
+			if string(event.Query) != "BEGIN" && string(event.Query) != "COMMIT" {
+				if len(event.Schema) > 0 {
+					p.write(append([]byte(fmt.Sprintf("USE `%s`;\n", event.Schema)), event.Query...), e)
 				}
+				// changeRows++
+			} else {
+				// fmt.Println(string(event.Query))
+				// log.Info("#start %d %d %d", e.Header.LogPos,
+				//  e.Header.LogPos+e.Header.EventSize,
+				//  e.Header.LogPos-e.Header.EventSize)
+				// if binlog_event.query == 'BEGIN':
+				//                    e_start_pos = last_pos
+			}
+		case *replication.RowsEvent:
+			if !p.schemaFilter(event.Table) {
+				continue // goto CHECK_STOP
+			}
+			if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
+				continue // goto CHECK_STOP
+			}
+			table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
+			if err != nil {
+				return err
+			}
 
-				if p.cfg.Flashback || !p.cfg.ParseDDL {
-					continue // goto CHECK_STOP
-				}
-
-				if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
-					continue // goto CHECK_STOP
-				}
-
-				if string(event.Query) != "BEGIN" && string(event.Query) != "COMMIT" {
-
-					if len(string(event.Schema)) > 0 {
-						p.write(append([]byte(fmt.Sprintf("USE `%s`;\n", event.Schema)), event.Query...), e)
+			switch e.Header.EventType {
+			case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
+				if _, ok := p.cfg.SqlTypes["insert"]; ok {
+					if p.cfg.Flashback {
+						_, err = p.generateDeleteSql(table, event, e)
+					} else {
+						_, err = p.generateInsertSql(table, event, e)
 					}
-
-					i++
-				} else {
-					// fmt.Println(string(event.Query))
-					// log.Info("#start %d %d %d", e.Header.LogPos,
-					//  e.Header.LogPos+e.Header.EventSize,
-					//  e.Header.LogPos-e.Header.EventSize)
-					// if binlog_event.query == 'BEGIN':
-					//                    e_start_pos = last_pos
+					changeRows = changeRows + len(event.Rows)
+				}
+			case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
+				if _, ok := p.cfg.SqlTypes["delete"]; ok {
+					if p.cfg.Flashback {
+						_, err = p.generateInsertSql(table, event, e)
+					} else {
+						_, err = p.generateDeleteSql(table, event, e)
+					}
+					changeRows = changeRows + len(event.Rows)
+				}
+			case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
+				if _, ok := p.cfg.SqlTypes["update"]; ok {
+					_, err = p.generateUpdateSql(table, event, e)
+					changeRows = changeRows + len(event.Rows)/2
 				}
 			}
-		} else if _, ok := p.cfg.SqlTypes["insert"]; ok &&
-			e.Header.EventType == replication.WRITE_ROWS_EVENTv2 {
-			if event, ok := e.Event.(*replication.RowsEvent); ok {
-				if !p.schemaFilter(event.Table) {
-					continue // goto CHECK_STOP
-				}
 
-				if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
-					continue // goto CHECK_STOP
-				}
-
-				table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
-				if err != nil {
-					return err
-				}
-
-				if p.cfg.Flashback {
-					_, err = p.generateDeleteSql(table, event, e)
-				} else {
-					_, err = p.generateInsertSql(table, event, e)
-				}
-				if err != nil {
-					return err
-				}
-				i = i + len(event.Rows)
-				// log.Info().Int("i", i).Int("len行数", len(event.Rows)).Msg("解析行数")
+			if err != nil {
+				return err
 			}
-		} else if _, ok := p.cfg.SqlTypes["delete"]; ok &&
-			e.Header.EventType == replication.DELETE_ROWS_EVENTv2 {
-			if event, ok := e.Event.(*replication.RowsEvent); ok {
-				if !p.schemaFilter(event.Table) {
-					continue // goto CHECK_STOP
-				}
 
-				if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
-					continue // goto CHECK_STOP
-				}
+		}
 
-				table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
-				p.checkError(err)
+		if len(p.cfg.SocketUser) > 0 {
+			// 如果指定了websocket用户,就每5s发送一次进度通知
+			if changeRows > sendCount && time.Now().After(sendTime) {
+				sendCount = changeRows
+				sendTime = time.Now().Add(time.Second * 5)
 
-				if p.cfg.Flashback {
-					_, err = p.generateInsertSql(table, event, e)
-				} else {
-					_, err = p.generateDeleteSql(table, event, e)
+				kwargs := map[string]interface{}{"rows": changeRows}
+				if p.stopTimestamp > 0 && p.startTimestamp > 0 && p.stopTimestamp > p.startTimestamp {
+					kwargs["pct"] = (e.Header.Timestamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp)
 				}
-				if err != nil {
-					return err
-				}
-				i = i + len(event.Rows)
-				// log.Info().Int("i", i).Int("len行数", len(event.Rows)).Msg("解析行数")
-			}
-		} else if _, ok := p.cfg.SqlTypes["update"]; ok &&
-			e.Header.EventType == replication.UPDATE_ROWS_EVENTv2 {
-			if event, ok := e.Event.(*replication.RowsEvent); ok {
-				if !p.schemaFilter(event.Table) {
-					continue // goto CHECK_STOP
-				}
+				go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
 
-				if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
-					continue // goto CHECK_STOP
-				}
-
-				table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
-				if err != nil {
-					return err
-				}
-				_, err = p.generateUpdateSql(table, event, e)
-				if err != nil {
-					return err
-				}
-				i = i + len(event.Rows)/2
 			}
 		}
 
-		if e.Header.EventType == replication.QUERY_EVENT ||
-			e.Header.EventType == replication.UPDATE_ROWS_EVENTv2 ||
-			e.Header.EventType == replication.WRITE_ROWS_EVENTv2 ||
-			e.Header.EventType == replication.DELETE_ROWS_EVENTv2 {
-
-			if len(p.cfg.SocketUser) > 0 {
-				// 如果指定了websocket用户,就每5s发送一次进度通知
-				if i > sendCount && time.Now().After(sendTime) {
-					sendCount = i
-					sendTime = time.Now().Add(time.Second * 5)
-
-					kwargs := map[string]interface{}{"rows": i}
-					if p.stopTimestamp > 0 && p.startTimestamp > 0 && p.stopTimestamp > p.startTimestamp {
-						kwargs["pct"] = (e.Header.Timestamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp)
-					}
-					go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
-
-				}
-			}
-
-			if p.cfg.MaxRows > 0 && i >= p.cfg.MaxRows {
-				log.Info("已超出最大行数")
-
-				if !p.cfg.StopNever {
-					break
-				}
-			}
+		if p.cfg.MaxRows > 0 && changeRows >= p.cfg.MaxRows {
+			log.Info("已超出最大行数")
+			break
 		}
 
 		// 再次判断是否到结束位置,以免处在临界值,且无新日志时程序卡住
 		if e.Header.Timestamp > 0 {
 			if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
 				log.Warn("已超出结束时间")
-				if !p.cfg.StopNever {
-					break
-				}
+				break
 			}
 		}
 
@@ -614,8 +557,8 @@ func (p *MyBinlogParser) Parser() error {
 	if len(p.cfg.SocketUser) > 0 {
 		p.outputFile.Close()
 
-		if i > 0 {
-			kwargs := map[string]interface{}{"rows": i}
+		if changeRows > 0 {
+			kwargs := map[string]interface{}{"rows": changeRows}
 			kwargs["pct"] = 99
 
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
@@ -647,7 +590,7 @@ func (p *MyBinlogParser) Parser() error {
 			p.clear()
 
 			log.Info("压缩完成")
-			kwargs = map[string]interface{}{"ok": "1", "pct": 100, "rows": i,
+			kwargs = map[string]interface{}{"ok": "1", "pct": 100, "rows": changeRows,
 				"url": "/go/download/" + strings.Replace(url, "../", "", -1), "size": filesize}
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度",
 				"", kwargs)
