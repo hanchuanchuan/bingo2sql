@@ -56,9 +56,11 @@ var (
 
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
 
-	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
-
 	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选. 默认False")
+
+	minimalUpdate = flagBoolean("minimal-update", "M", false, "最小化update语句. 可选. 默认False")
+
+	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
 )
 
 func main() {
@@ -132,6 +134,7 @@ func runParse() {
 		OutputFileStr: *output,
 
 		RemovePrimary: *removePrimary,
+		MinimalUpdate: *minimalUpdate,
 
 		StopNever: *stopNever,
 	}

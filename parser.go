@@ -142,6 +142,8 @@ type BinlogParserConfig struct {
 	RemovePrimary bool
 	// 持续解析binlog
 	StopNever bool
+	// 最小化Update语句, 当开启时,update语句中未变更的值不再记录到解析结果中
+	MinimalUpdate bool
 }
 
 type Parser interface {
@@ -605,8 +607,6 @@ func (p *MyBinlogParser) Parser() error {
 		}
 	}
 
-	log.Info("操作完成")
-
 	close(p.ch)
 
 	wg.Wait()
@@ -662,7 +662,7 @@ func (p *MyBinlogParser) Parser() error {
 		}
 	}
 
-	log.Info("操作结束")
+	log.Info("解析完成")
 	return nil
 }
 
@@ -897,6 +897,12 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 
 		if err := p.readTableSchema(p.cfg.Tables); err != nil {
 			return nil, fmt.Errorf("读取表结构文件失败(%s): %v", p.cfg.Tables, err)
+		}
+
+		if len(p.tableCacheList) == 0 {
+			return nil, fmt.Errorf("未找到建表语句! 请提供需要解析的表对应的建表语句,并以分号分隔.")
+		} else {
+			log.Infof("共读取到表结构 %d 个", len(p.tableCacheList))
 		}
 
 		p.localMode = true
@@ -1190,24 +1196,20 @@ func (p *MyBinlogParser) checkError(e error) {
 }
 
 func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
-
 	if len(p.cfg.OnlyDatabases) == 0 && len(p.cfg.OnlyTables) == 0 {
 		return true
 	}
 
 	if len(p.cfg.OnlyDatabases) > 0 {
-		_, ok := (p.cfg.OnlyDatabases)[string(table.Schema)]
-		if !ok {
+		if _, ok := (p.cfg.OnlyDatabases)[string(table.Schema)]; !ok {
 			return false
 		}
 	}
 	if len(p.cfg.OnlyTables) > 0 {
-		_, ok := (p.cfg.OnlyTables)[strings.ToLower(string(table.Table))]
-		if !ok {
+		if _, ok := (p.cfg.OnlyTables)[strings.ToLower(string(table.Table))]; !ok {
 			return false
 		}
 	}
-
 	return true
 }
 
@@ -1394,18 +1396,30 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 	c_null := " `%s` IS ?"
 	c := " `%s`=?"
 
+	var sql string
 	var sets []string
 
-	for i, col := range t.Columns {
-		if i < int(e.ColumnCount) {
-			sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
+	// for i, col := range t.Columns {
+	// 	if i < int(e.ColumnCount) {
+	// 		sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
+	// 	}
+	// }
+
+	// 最小化回滚语句, 当开启时,update语句中未变更的值不再记录到回滚语句中
+	minimalMode := p.cfg.MinimalUpdate
+
+	if !minimalMode {
+		for i, col := range t.Columns {
+			if i < int(e.ColumnCount) {
+				sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
+			}
 		}
+		sql = fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
+			strings.Join(sets, ","))
 	}
 
-	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
-		strings.Join(sets, ","))
-
-	// log.Info(sql)
+	// sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
+	// 	strings.Join(sets, ","))
 
 	var (
 		oldValues []driver.Value
@@ -1423,10 +1437,24 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 
 			for j, d := range rows {
 				if p.cfg.Flashback {
-					if t.Columns[j].IsUnsigned() {
-						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+					if minimalMode {
+						// 最小化模式下,列如果相等则省略
+						if !compareValue(d, e.Rows[i+1][j]) {
+							if t.Columns[j].IsUnsigned() {
+								d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+							}
+							newValues = append(newValues, d)
+							if j < len(t.Columns) {
+								sets = append(sets, fmt.Sprintf(setValue, t.Columns[j].ColumnName))
+							}
+						}
+					} else {
+						if t.Columns[j].IsUnsigned() {
+							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+						}
+						newValues = append(newValues, d)
 					}
-					newValues = append(newValues, d)
+
 				} else {
 					if t.hasPrimary {
 						_, ok := t.primarys[j]
@@ -1496,15 +1524,32 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 						}
 					}
 				} else {
-					if t.Columns[j].IsUnsigned() {
-						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+					if minimalMode {
+						// 最小化模式下,列如果相等则省略
+						if !compareValue(d, e.Rows[i-1][j]) {
+							if t.Columns[j].IsUnsigned() {
+								d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+							}
+							newValues = append(newValues, d)
+							if j < len(t.Columns) {
+								sets = append(sets, fmt.Sprintf(setValue, t.Columns[j].ColumnName))
+							}
+						}
+					} else {
+						if t.Columns[j].IsUnsigned() {
+							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+						}
+						newValues = append(newValues, d)
 					}
-					newValues = append(newValues, d)
 				}
 			}
 
 			newValues = append(newValues, oldValues...)
-
+			if minimalMode {
+				sql = fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
+					strings.Join(sets, ","))
+				sets = nil
+			}
 			newSql = strings.Join([]string{sql, strings.Join(columnNames, " AND")}, "")
 			// log.Info(newSql, len(newValues))
 			r, err := InterpolateParams(newSql, newValues)
@@ -2092,10 +2137,36 @@ func buildTableInfo(node *ast.CreateTableStmt) *Table {
 		TableName: node.Table.Name.String(),
 	}
 
+	for _, ct := range node.Constraints {
+		switch ct.Tp {
+		// 设置主键标志
+		case ast.ConstraintPrimaryKey:
+			for _, col := range ct.Keys {
+				for _, field := range node.Cols {
+					if field.Name.Name.L == col.Column.Name.L {
+						field.Tp.Flag |= tidb.PriKeyFlag
+						break
+					}
+				}
+			}
+		case ast.ConstraintUniq, ast.ConstraintUniqIndex, ast.ConstraintUniqKey:
+			for _, col := range ct.Keys {
+				for _, field := range node.Cols {
+					if field.Name.Name.L == col.Column.Name.L {
+						field.Tp.Flag |= tidb.UniqueKeyFlag
+						break
+					}
+				}
+			}
+		}
+	}
+
 	table.Columns = make([]Column, 0, len(node.Cols))
 	for _, field := range node.Cols {
 		table.Columns = append(table.Columns, *buildNewColumnToCache(table, field))
 	}
+
+	table.configPrimaryKey()
 
 	return table
 }
@@ -2126,4 +2197,51 @@ func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
 		c.ColumnKey = "UNI"
 	}
 	return c
+}
+
+// compareValue 比较两值是否相等
+func compareValue(v1 interface{}, v2 interface{}) bool {
+	equal := false
+	switch v := v1.(type) {
+	case []byte:
+		equal = reflect.DeepEqual(v1, v2)
+	case decimal.Decimal:
+		if newDec, ok := v2.(decimal.Decimal); ok {
+			equal = v.Equal(newDec)
+		} else {
+			equal = false
+		}
+	default:
+		equal = v1 == v2
+	}
+
+	return equal
+}
+
+// configPrimaryKey 配置主键设置
+func (t *Table) configPrimaryKey() {
+	var primarys map[int]bool
+	primarys = make(map[int]bool)
+
+	var uniques map[int]bool
+	uniques = make(map[int]bool)
+	for i, r := range t.Columns {
+		if r.ColumnKey == "PRI" {
+			primarys[i] = true
+		}
+		if r.ColumnKey == "UNI" {
+			uniques[i] = true
+		}
+	}
+
+	// newTable.tableId = tableId
+	if len(primarys) > 0 {
+		t.primarys = primarys
+		t.hasPrimary = true
+	} else if len(uniques) > 0 {
+		t.primarys = uniques
+		t.hasPrimary = true
+	} else {
+		t.hasPrimary = false
+	}
 }

@@ -1,5 +1,7 @@
 module github.com/hanchuanchuan/bingo2sql
 
+replace github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.2.0
+
 go 1.13
 
 require (
