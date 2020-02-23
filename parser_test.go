@@ -1,0 +1,725 @@
+package bingo2sql_test
+
+import (
+	"bufio"
+	"flag"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/hanchuanchuan/bingo2sql"
+	"github.com/hanchuanchuan/go-mysql/client"
+	"github.com/hanchuanchuan/go-mysql/mysql"
+	. "github.com/pingcap/check"
+	log "github.com/sirupsen/logrus"
+)
+
+// Use docker mysql to test, mysql is 3306, mariadb is 3316
+var testHost = flag.String("host", "127.0.0.1", "MySQL master host")
+
+var testOutputLogs = flag.Bool("out", false, "output binlog event")
+var (
+	// 解析binlog生成的SQL文件
+	binlogOutputFile string = "binlog_output.sql"
+	// 本地方式解析binlog生成的SQL文件
+	localOutputFile string = "binlog_output.sql"
+
+	// 表结构文件. 用于本地解析
+	tableSchemaFile string = "table_schema.sql"
+)
+var (
+	defaultConfig bingo2sql.BinlogParserConfig
+	localConfig   bingo2sql.BinlogParserConfig
+)
+var _ = Suite(&testParserSuite{})
+
+func TestBinLogSyncer(t *testing.T) {
+	TestingT(t)
+}
+
+type testParserSuite struct {
+	// b *BinlogSyncer
+	c *client.Conn
+
+	wg sync.WaitGroup
+
+	flavor string
+
+	config      bingo2sql.BinlogParserConfig
+	localConfig bingo2sql.BinlogParserConfig
+}
+
+func (t *testParserSuite) SetUpSuite(c *C) {
+	defaultConfig = bingo2sql.BinlogParserConfig{
+		Host:     *testHost,
+		Port:     3306,
+		User:     "test",
+		Password: "test",
+
+		StartFile: "mysql-bin.000001",
+
+		Databases:     "test",
+		OutputFileStr: binlogOutputFile,
+	}
+
+	localConfig = bingo2sql.BinlogParserConfig{
+		// 通过setBinlogDir自动获取
+		// StartFile: "mysql-bin.000001",
+
+		Databases:     "test",
+		Tables:        tableSchemaFile,
+		OutputFileStr: localOutputFile,
+	}
+
+	t.config = defaultConfig
+	t.localConfig = localConfig
+
+	t.initTableSchema()
+	t.setBinlogDir(c)
+	log.SetLevel(log.ErrorLevel)
+}
+
+func (t *testParserSuite) TearDownSuite(c *C) {
+	os.Remove(binlogOutputFile)
+	os.Remove(localOutputFile)
+	os.Remove(tableSchemaFile)
+}
+
+func (t *testParserSuite) SetUpTest(c *C) {
+}
+
+func (t *testParserSuite) TearDownTest(c *C) {
+	t.reset()
+
+	// if t.b != nil {
+	// 	t.b.Close()
+	// 	t.b = nil
+	// }
+
+	if t.c != nil {
+		t.c.Close()
+		t.c = nil
+	}
+}
+
+func (t *testParserSuite) testExecute(c *C, query ...string) {
+	for _, q := range query {
+		_, err := t.c.Execute(q)
+		c.Assert(err, IsNil)
+	}
+}
+
+func (t *testParserSuite) setBinlogDir(c *C) {
+	if t.c == nil {
+		t.setupTest(c, mysql.MySQLFlavor)
+	}
+
+	result, err := t.c.Execute("show variables like 'log_bin_basename'")
+	c.Assert(err, IsNil)
+
+	basename, err := result.GetString(0, 1)
+	c.Assert(err, IsNil)
+
+	basename = strings.Replace(basename, "/data/mysql", "/Users/hanchuanchuan", 1)
+
+	t.localConfig.StartFile = fmt.Sprintf("%s.000001", basename)
+	localConfig.StartFile = fmt.Sprintf("%s.000001", basename)
+	// log.Errorf("%#v", ss)
+
+}
+
+func (t *testParserSuite) SetFlashback(v bool) {
+	t.config.Flashback = v
+	t.localConfig.Flashback = v
+}
+
+func (t *testParserSuite) SetRemovePrimary(v bool) {
+	t.config.RemovePrimary = v
+	t.localConfig.RemovePrimary = v
+}
+
+func (t *testParserSuite) setupTest(c *C, flavor string) {
+	var port uint16 = 3306
+	switch flavor {
+	case mysql.MariaDBFlavor:
+		port = 3316
+	}
+
+	t.flavor = flavor
+
+	var err error
+	if t.c != nil {
+		t.c.Close()
+	}
+
+	// db, err := sql.Open(sqlType, "user:password@tcp(127.0.0.1:3306)/database?multiStatements=true")
+	// if err != nil {
+	// 	log.Fatalf("open mysql err: %s", err)
+	// }
+
+	t.c, err = client.Connect(fmt.Sprintf("%s:%d", *testHost, port), "test", "test", "")
+	c.Assert(err, IsNil)
+
+	// _, err = t.c.Execute("CREATE DATABASE IF NOT EXISTS test")
+	// c.Assert(err, IsNil)
+
+	_, err = t.c.Execute("USE test")
+	c.Assert(err, IsNil)
+
+	// if t.b != nil {
+	// 	t.b.Close()
+	// }
+
+	// cfg := BinlogSyncerConfig{
+	// 	ServerID:   100,
+	// 	Flavor:     flavor,
+	// 	Host:       *testHost,
+	// 	Port:       port,
+	// 	User:       "root",
+	// 	Password:   "",
+	// 	UseDecimal: true,
+	// }
+
+	// t.b = NewBinlogSyncer(cfg)
+}
+
+// func (t *testParserSuite) testPositionSync(c *C) {
+// 	//get current master binlog file and position
+// 	r, err := t.c.Execute("SHOW MASTER STATUS")
+// 	c.Assert(err, IsNil)
+// 	binFile, _ := r.GetString(0, 0)
+// 	binPos, _ := r.GetInt(0, 1)
+
+// 	s, err := t.b.StartSync(mysql.Position{Name: binFile, Pos: uint32(binPos)})
+// 	c.Assert(err, IsNil)
+
+// 	// Test re-sync.
+// 	time.Sleep(100 * time.Millisecond)
+// 	t.b.c.SetReadDeadline(time.Now().Add(time.Millisecond))
+// 	time.Sleep(100 * time.Millisecond)
+
+// 	t.testSync(c, s)
+// }
+
+// func (t *testParserSuite) TestMysqlPositionSync(c *C) {
+// 	t.setupTest(c, mysql.MySQLFlavor)
+// 	t.testPositionSync(c)
+// }
+
+// func (t *testParserSuite) TestMysqlGTIDSync(c *C) {
+// 	t.setupTest(c, mysql.MySQLFlavor)
+
+// 	r, err := t.c.Execute("SELECT @@gtid_mode")
+// 	c.Assert(err, IsNil)
+// 	modeOn, _ := r.GetString(0, 0)
+// 	if modeOn != "ON" {
+// 		c.Skip("GTID mode is not ON")
+// 	}
+
+// 	r, err = t.c.Execute("SHOW GLOBAL VARIABLES LIKE 'SERVER_UUID'")
+// 	c.Assert(err, IsNil)
+
+// 	var masterUuid uuid.UUID
+// 	if s, _ := r.GetString(0, 1); len(s) > 0 && s != "NONE" {
+// 		masterUuid, err = uuid.FromString(s)
+// 		c.Assert(err, IsNil)
+// 	}
+
+// 	set, _ := mysql.ParseMysqlGTIDSet(fmt.Sprintf("%s:%d-%d", masterUuid.String(), 1, 2))
+
+// 	s, err := t.b.StartSyncGTID(set)
+// 	c.Assert(err, IsNil)
+
+// 	t.testSync(c, s)
+// }
+
+// func (t *testParserSuite) TestMariadbPositionSync(c *C) {
+// 	t.setupTest(c, mysql.MariaDBFlavor)
+
+// 	t.testPositionSync(c)
+// }
+
+// func (t *testParserSuite) TestMariadbGTIDSync(c *C) {
+// 	t.setupTest(c, mysql.MariaDBFlavor)
+
+// 	// get current master gtid binlog pos
+// 	r, err := t.c.Execute("SELECT @@gtid_binlog_pos")
+// 	c.Assert(err, IsNil)
+
+// 	str, _ := r.GetString(0, 0)
+// 	set, _ := mysql.ParseMariadbGTIDSet(str)
+
+// 	s, err := t.b.StartSyncGTID(set)
+// 	c.Assert(err, IsNil)
+
+// 	t.testSync(c, s)
+// }
+
+// func (t *testParserSuite) TestMariadbAnnotateRows(c *C) {
+// 	t.setupTest(c, mysql.MariaDBFlavor)
+// 	t.b.cfg.DumpCommandFlag = BINLOG_SEND_ANNOTATE_ROWS_EVENT
+// 	t.testPositionSync(c)
+// }
+
+// func (t *testParserSuite) TestMysqlSemiPositionSync(c *C) {
+// 	t.setupTest(c, mysql.MySQLFlavor)
+
+// 	t.b.cfg.SemiSyncEnabled = true
+
+// 	t.testPositionSync(c)
+// }
+
+// func (t *testParserSuite) TestMysqlBinlogCodec(c *C) {
+// 	t.setupTest(c, mysql.MySQLFlavor)
+
+// 	t.testExecute(c, "RESET MASTER")
+
+// 	var wg sync.WaitGroup
+// 	wg.Add(1)
+// 	defer wg.Wait()
+
+// 	go func() {
+// 		defer wg.Done()
+
+// 		t.testSync(c, nil)
+
+// 		t.testExecute(c, "FLUSH LOGS")
+
+// 		t.testSync(c, nil)
+// 	}()
+
+// 	binlogDir := "./var"
+
+// 	os.RemoveAll(binlogDir)
+
+// 	err := t.b.StartBackup(binlogDir, mysql.Position{Name: "", Pos: uint32(0)}, 2*time.Second)
+// 	c.Assert(err, IsNil)
+
+// 	p := NewBinlogParser()
+// 	p.SetVerifyChecksum(true)
+
+// 	f := func(e *BinlogEvent) error {
+// 		if *testOutputLogs {
+// 			e.Dump(os.Stdout)
+// 			os.Stdout.Sync()
+// 		}
+// 		return nil
+// 	}
+
+// 	dir, err := os.Open(binlogDir)
+// 	c.Assert(err, IsNil)
+// 	defer dir.Close()
+
+// 	files, err := dir.Readdirnames(-1)
+// 	c.Assert(err, IsNil)
+
+// 	for _, file := range files {
+// 		err = p.ParseFile(path.Join(binlogDir, file), 0, f)
+// 		c.Assert(err, IsNil)
+// 	}
+// }
+
+func (t *testParserSuite) checkBinlog(c *C, sqls ...string) {
+	binlogs := t.getBinlog(c)
+	c.Assert(len(binlogs), Equals, len(sqls), Commentf("%#v", binlogs))
+	for i, line := range binlogs {
+		c.Assert(line, Equals, sqls[i], Commentf("%#v", binlogs))
+	}
+}
+
+func (t *testParserSuite) getBinlog(c *C) []string {
+	// 在线方式解析
+	resultOnline := t.getBinlogWithConfig(c, &t.config)
+	// 本地解析
+	resultLocal := t.getBinlogWithConfig(c, &t.localConfig)
+
+	c.Assert(len(resultOnline), Equals, len(resultLocal), Commentf("%#v", resultOnline))
+	for i, line := range resultOnline {
+		c.Assert(line, Equals, resultLocal[i], Commentf("%#v", resultOnline))
+	}
+
+	return resultOnline
+}
+
+// getBinlogWithConfig 根据配置文件
+func (t *testParserSuite) getBinlogWithConfig(c *C, config *bingo2sql.BinlogParserConfig) []string {
+
+	p, err := bingo2sql.NewBinlogParser(config)
+	c.Assert(err, IsNil)
+
+	err = p.Parser()
+	c.Assert(err, IsNil)
+
+	fileObj, err := os.Open(config.OutputFileStr)
+	c.Assert(err, IsNil)
+
+	defer fileObj.Close()
+	//一个文件对象本身是实现了io.Reader的 使用bufio.NewReader去初始化一个Reader对象，存在buffer中的，读取一次就会被清空
+	reader := bufio.NewReader(fileObj)
+
+	var buf []string
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err != io.EOF {
+				c.Assert(err, IsNil)
+				return nil
+			}
+			break
+		}
+
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "# ") || line == "" {
+			continue
+		}
+
+		if strings.Contains(line, "# ") {
+			line = line[0:strings.Index(line, "# ")]
+		}
+
+		buf = append(buf, strings.TrimSpace(line))
+	}
+	return buf
+}
+
+func (t *testParserSuite) reset() {
+	t.config = defaultConfig
+	t.localConfig = localConfig
+	log.SetLevel(log.ErrorLevel)
+}
+
+func (t *testParserSuite) TestSync(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		"SET SESSION binlog_format = 'MIXED'",
+		`DROP TABLE IF EXISTS test_replication`,
+		`CREATE TABLE test_replication (
+			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+			str VARCHAR(256),
+			f FLOAT,
+			d DOUBLE,
+			de DECIMAL(10,2),
+			i INT,
+			bi BIGINT,
+			e enum ("e1", "e2"),
+			b BIT(8),
+			y YEAR,
+			da DATE,
+			ts TIMESTAMP,
+			dt DATETIME,
+			tm TIME,
+			t TEXT,
+			bb BLOB,
+			se SET('a', 'b', 'c'),
+			PRIMARY KEY (id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8`)
+
+	//use row format
+	t.testExecute(c, "SET SESSION binlog_format = 'ROW'",
+		`INSERT INTO test_replication (str, f, i, e, b, y, da, ts, dt, tm, de, t, bb, se)
+		VALUES ("3", -3.14, 10, "e1", 0b0011, 1985,
+		"2012-05-07", "2012-05-07 14:01:01", "2012-05-07 14:01:01",
+		"14:01:01", -45363.64, "abc", "12345", "a,b")`)
+
+	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(1,'3',-3.14,NULL,-45363.64,10,NULL,1,3,1985,'2012-05-07','2012-05-07 14:01:01','2012-05-07 14:01:01','14:01:01','abc','12345',3);")
+
+	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(1,'3',-3.14,NULL,-45363.64,10,NULL,1,3,1985,'2012-05-07','2012-05-07 14:01:01','2012-05-07 14:01:01','14:01:01','abc','12345',3);")
+
+	t.SetFlashback(true)
+	t.checkBinlog(c, "DELETE FROM `test`.`test_replication` WHERE `id`=1;")
+
+	t.SetFlashback(false)
+	t.SetRemovePrimary(true)
+	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES('3',-3.14,NULL,-45363.64,10,NULL,1,3,1985,'2012-05-07','2012-05-07 14:01:01','2012-05-07 14:01:01','14:01:01','abc','12345',3);")
+
+}
+
+func (t *testParserSuite) TestGeometry(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c,
+		"RESET MASTER",
+		"DROP TABLE IF EXISTS test_geo",
+		`CREATE TABLE test_geo (id int auto_increment primary key, g GEOMETRY)`,
+	)
+
+	tbls := []string{
+		`INSERT INTO test_geo(g) VALUES (POINT(1, 1))`,
+		`INSERT INTO test_geo(g) VALUES (LINESTRING(POINT(0,0), POINT(1,1), POINT(2,2)))`,
+		`DELETE from test_geo where id>0`,
+	}
+
+	t.testExecute(c, tbls...)
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_geo` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_geo` WHERE `id`=2;",
+		"INSERT INTO `test`.`test_geo`(`id`,`g`) VALUES(1,'\\0\\0\\0\\0\x01\x01\\0\\0\\0\\0\\0\\0\\0\\0\\0\xf0?\\0\\0\\0\\0\\0\\0\xf0?');",
+		"INSERT INTO `test`.`test_geo`(`id`,`g`) VALUES(2,'\\0\\0\\0\\0\x01\x02\\0\\0\\0\x03\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\xf0?\\0\\0\\0\\0\\0\\0\xf0?\\0\\0\\0\\0\\0\\0\\0@\\0\\0\\0\\0\\0\\0\\0@');",
+	)
+}
+
+func (t *testParserSuite) TestDatetime(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c,
+		"RESET MASTER",
+		`SET sql_mode=''`,
+		`DROP TABLE IF EXISTS test_parse_time`,
+		`CREATE TABLE test_parse_time (
+			id int auto_increment primary key,
+			a1 DATETIME,
+			a2 DATETIME(3),
+			a3 DATETIME(6),
+			b1 TIMESTAMP,
+			b2 TIMESTAMP(3) ,
+			b3 TIMESTAMP(6))`,
+	)
+
+	t.testExecute(c, `INSERT INTO test_parse_time(a1,a2,a3,b1,b2,b3) VALUES
+		("2014-09-08 17:51:04.123456", "2014-09-08 17:51:04.123456", "2014-09-08 17:51:04.123456",
+		"2014-09-08 17:51:04.123456","2014-09-08 17:51:04.123456","2014-09-08 17:51:04.123456"),
+		("0000-00-00 00:00:00.000000", "0000-00-00 00:00:00.000000", "0000-00-00 00:00:00.000000",
+		"0000-00-00 00:00:00.000000", "0000-00-00 00:00:00.000000", "0000-00-00 00:00:00.000000"),
+		("2014-09-08 17:51:04.000456", "2014-09-08 17:51:04.000456", "2014-09-08 17:51:04.000456",
+		"2014-09-08 17:51:04.000456","2014-09-08 17:51:04.000456","2014-09-08 17:51:04.000456")`,
+		`delete from test_parse_time where id > 0`)
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_parse_time` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_parse_time` WHERE `id`=2;",
+		"DELETE FROM `test`.`test_parse_time` WHERE `id`=3;",
+		"INSERT INTO `test`.`test_parse_time`(`id`,`a1`,`a2`,`a3`,`b1`,`b2`,`b3`) VALUES(1,'2014-09-08 17:51:04','2014-09-08 17:51:04.123','2014-09-08 17:51:04.123456','2014-09-08 17:51:04','2014-09-08 17:51:04.123','2014-09-08 17:51:04.123456');",
+		"INSERT INTO `test`.`test_parse_time`(`id`,`a1`,`a2`,`a3`,`b1`,`b2`,`b3`) VALUES(2,'0000-00-00 00:00:00','0000-00-00 00:00:00.000','0000-00-00 00:00:00.000000','0000-00-00 00:00:00','0000-00-00 00:00:00.000','0000-00-00 00:00:00.000000');",
+		"INSERT INTO `test`.`test_parse_time`(`id`,`a1`,`a2`,`a3`,`b1`,`b2`,`b3`) VALUES(3,'2014-09-08 17:51:04','2014-09-08 17:51:04.000','2014-09-08 17:51:04.000456','2014-09-08 17:51:04','2014-09-08 17:51:04.000','2014-09-08 17:51:04.000456');",
+	)
+}
+
+func (t *testParserSuite) TestMinimal(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	id := 100
+	t.testExecute(c, `RESET MASTER;`,
+		"SET SESSION binlog_row_image = 'MINIMAL'",
+		fmt.Sprintf(`INSERT INTO test_replication (id, str, f, i, bb, de) VALUES (%d, "4", -3.14, 100, "abc", -45635.64)`, id),
+		fmt.Sprintf(`UPDATE test_replication SET f = -12.14, de = 555.34 WHERE id = %d`, id),
+		fmt.Sprintf(`DELETE FROM test_replication WHERE id = %d`, id))
+
+	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(100,'4',-3.14,NULL,-45635.64,100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'abc',NULL);",
+		"UPDATE `test`.`test_replication` SET `id`=NULL, `str`=NULL, `f`=-12.14, `d`=NULL, `de`=555.34, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id`=100;",
+		"DELETE FROM `test`.`test_replication` WHERE `id`=100;")
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_replication` WHERE `id`=100;",
+		"UPDATE `test`.`test_replication` SET `id`=100, `str`=NULL, `f`=NULL, `d`=NULL, `de`=NULL, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id` IS NULL;",
+		"INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);")
+
+	t.SetFlashback(false)
+	t.SetRemovePrimary(true)
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_replication`(`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES('4',-3.14,NULL,-45635.64,100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'abc',NULL);",
+		"UPDATE `test`.`test_replication` SET `id`=NULL, `str`=NULL, `f`=-12.14, `d`=NULL, `de`=555.34, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id`=100;",
+		"DELETE FROM `test`.`test_replication` WHERE `id`=100;")
+
+}
+
+func (t *testParserSuite) TestJson(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_json`,
+		`CREATE TABLE test_json (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 JSON,
+				c2 DECIMAL(10, 0),
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`)
+
+	t.testExecute(c,
+		`INSERT INTO test_json (c2) VALUES (1)`,
+		`INSERT INTO test_json (c1, c2) VALUES ('{"key1": "value1", "key2": "value2"}', 1)`,
+		`update test_json set c1 = '{"key1": "value123"}',c2=2000 where id =2`,
+		`delete from test_json where id > 0`)
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_json` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_json` WHERE `id`=2;",
+		"UPDATE `test`.`test_json` SET `id`=2, `c1`='{\\\"key1\\\":\\\"value1\\\",\\\"key2\\\":\\\"value2\\\"}', `c2`=1 WHERE `id`=2;",
+		"INSERT INTO `test`.`test_json`(`id`,`c1`,`c2`) VALUES(1,NULL,1);",
+		"INSERT INTO `test`.`test_json`(`id`,`c1`,`c2`) VALUES(2,'{\\\"key1\\\":\\\"value123\\\"}',2000);")
+}
+
+func (t *testParserSuite) TestJsonV2(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		"DROP TABLE IF EXISTS test_json_v2",
+		`CREATE TABLE test_json_v2 (
+				id INT,
+				c JSON,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`)
+
+	tbls := []string{
+		`INSERT INTO test_json_v2 VALUES (0, NULL)`,
+		`INSERT INTO test_json_v2 VALUES (1, '{\"a\": 2}')`,
+		`INSERT INTO test_json_v2 VALUES (2, '[1,2]')`,
+		`INSERT INTO test_json_v2 VALUES (3, '{\"a\":\"b\", \"c\":\"d\",\"ab\":\"abc\", \"bc\": [\"x\", \"y\"]}')`,
+		`INSERT INTO test_json_v2 VALUES (4, '[\"here\", [\"I\", \"am\"], \"!!!\"]')`,
+		`INSERT INTO test_json_v2 VALUES (5, '\"scalar string\"')`,
+		`INSERT INTO test_json_v2 VALUES (6, 'true')`,
+		`INSERT INTO test_json_v2 VALUES (7, 'false')`,
+		`INSERT INTO test_json_v2 VALUES (8, 'null')`,
+		`INSERT INTO test_json_v2 VALUES (9, '-1')`,
+		`INSERT INTO test_json_v2 VALUES (10, CAST(CAST(1 AS UNSIGNED) AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (11, '32767')`,
+		`INSERT INTO test_json_v2 VALUES (12, '32768')`,
+		`INSERT INTO test_json_v2 VALUES (13, '-32768')`,
+		`INSERT INTO test_json_v2 VALUES (14, '-32769')`,
+		`INSERT INTO test_json_v2 VALUES (15, '2147483647')`,
+		`INSERT INTO test_json_v2 VALUES (16, '2147483648')`,
+		`INSERT INTO test_json_v2 VALUES (17, '-2147483648')`,
+		`INSERT INTO test_json_v2 VALUES (18, '-2147483649')`,
+		`INSERT INTO test_json_v2 VALUES (19, '18446744073709551615')`,
+		`INSERT INTO test_json_v2 VALUES (20, '18446744073709551616')`,
+		`INSERT INTO test_json_v2 VALUES (21, '3.14')`,
+		`INSERT INTO test_json_v2 VALUES (22, '{}')`,
+		`INSERT INTO test_json_v2 VALUES (23, '[]')`,
+		`INSERT INTO test_json_v2 VALUES (24, CAST(CAST('2015-01-15 23:24:25' AS DATETIME) AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (25, CAST(CAST('23:24:25' AS TIME) AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (125, CAST(CAST('23:24:25.12' AS TIME(3)) AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (225, CAST(CAST('23:24:25.0237' AS TIME(3)) AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (26, CAST(CAST('2015-01-15' AS DATE) AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (27, CAST(TIMESTAMP'2015-01-15 23:24:25' AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (127, CAST(TIMESTAMP'2015-01-15 23:24:25.12' AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (227, CAST(TIMESTAMP'2015-01-15 23:24:25.0237' AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (327, CAST(UNIX_TIMESTAMP('2015-01-15 23:24:25') AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (28, CAST(ST_GeomFromText('POINT(1 1)') AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (29, CAST('[]' AS CHAR CHARACTER SET 'ascii'))`,
+		// TODO: 30 and 31 are BIT type from JSON_TYPE, may support later.
+		`INSERT INTO test_json_v2 VALUES (30, CAST(x'cafe' AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (31, CAST(x'cafebabe' AS JSON))`,
+		`INSERT INTO test_json_v2 VALUES (100, CONCAT('{\"', REPEAT('a', 2 * 100 - 1), '\":123}'))`,
+	}
+
+	t.testExecute(c, tbls...)
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(0,NULL);",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(1,'{\\\"a\\\":2}');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(2,'[1,2]');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(3,'{\\\"a\\\":\\\"b\\\",\\\"ab\\\":\\\"abc\\\",\\\"bc\\\":[\\\"x\\\",\\\"y\\\"],\\\"c\\\":\\\"d\\\"}');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(4,'[\\\"here\\\",[\\\"I\\\",\\\"am\\\"],\\\"!!!\\\"]');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(5,'\\\"scalar string\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(6,'true');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(7,'false');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(8,'null');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(9,'-1');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(10,'1');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(11,'32767');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(12,'32768');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(13,'-32768');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(14,'-32769');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(15,'2147483647');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(16,'2147483648');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(17,'-2147483648');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(18,'-2147483649');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(19,'18446744073709551615');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(20,'18446744073709552000');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(21,'3.14');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(22,'{}');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(23,'[]');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(24,'\\\"2015-01-15 23:24:25.000000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(25,'\\\"23:24:25.000000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(125,'\\\"23:24:25.120000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(225,'\\\"23:24:25.024000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(26,'\\\"2015-01-15 00:00:00.000000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(27,'\\\"2015-01-15 23:24:25.000000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(127,'\\\"2015-01-15 23:24:25.120000\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(227,'\\\"2015-01-15 23:24:25.023700\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(327,'1421335465');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(28,'{\\\"coordinates\\\":[1,1],\\\"type\\\":\\\"Point\\\"}');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(29,'[]');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(30,'\\\"\\\\ufffd\\\\ufffd\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(31,'\\\"\\\\ufffd\\\\ufffd\\\\ufffd\\\\ufffd\\\"');",
+		"INSERT INTO `test`.`test_json_v2`(`id`,`c`) VALUES(100,'{\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\":123}');")
+
+	t.testExecute(c, "delete from test_json_v2 where id >0")
+}
+
+func (t *testParserSuite) initTableSchema(tableName ...string) {
+
+	allTables := map[string]string{
+		"test_json_v2": `CREATE TABLE test_json_v2 (
+				id INT,
+				c JSON,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`,
+		"test_replication": `CREATE TABLE test_replication (
+					id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+					str VARCHAR(256),
+					f FLOAT,
+					d DOUBLE,
+					de DECIMAL(10,2),
+					i INT,
+					bi BIGINT,
+					e enum ("e1", "e2"),
+					b BIT(8),
+					y YEAR,
+					da DATE,
+					ts TIMESTAMP,
+					dt DATETIME,
+					tm TIME,
+					t TEXT,
+					bb BLOB,
+					se SET('a', 'b', 'c'),
+					PRIMARY KEY (id)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8`,
+		"test_json": `CREATE TABLE test_json (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 JSON,
+				c2 DECIMAL(10, 0),
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`,
+		"test_geo": `CREATE TABLE test_geo (id int auto_increment primary key, g GEOMETRY)`,
+		"test_parse_time": `CREATE TABLE test_parse_time (
+			id int auto_increment primary key,
+			a1 DATETIME,
+			a2 DATETIME(3),
+			a3 DATETIME(6),
+			b1 TIMESTAMP,
+			b2 TIMESTAMP(3) ,
+			b3 TIMESTAMP(6))`,
+	}
+
+	var tables []string
+
+	if len(tableName) > 0 {
+		for _, name := range tableName {
+			if v, ok := allTables[name]; ok {
+				tables = append(tables, v)
+			}
+		}
+	} else {
+		for _, value := range allTables {
+			tables = append(tables, value)
+		}
+	}
+
+	err := ioutil.WriteFile(tableSchemaFile, []byte(strings.Join(tables, ";\n")), 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+}

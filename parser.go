@@ -791,7 +791,10 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	p.ch = make(chan *row, 50)
 
 	p.write1 = p
+
+	cfg.BeginTime = time.Now().Unix()
 	p.cfg = cfg
+
 	p.cfg.OnlyDatabases = make(map[string]bool)
 	p.cfg.OnlyTables = make(map[string]bool)
 	p.cfg.SqlTypes = make(map[string]bool)

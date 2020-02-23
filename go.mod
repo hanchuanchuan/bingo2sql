@@ -6,6 +6,7 @@ go 1.13
 
 require (
 	github.com/frankban/quicktest v1.7.2 // indirect
+	github.com/go-sql-driver/mysql v1.4.1
 	github.com/hanchuanchuan/go-mysql v0.0.0-20200114082439-6d0d8d3a982e
 	github.com/hanchuanchuan/goInception v1.2.0
 	github.com/imroc/req v0.3.0
@@ -17,7 +18,9 @@ require (
 	github.com/labstack/gommon v0.3.0 // indirect
 	github.com/mholt/archiver/v3 v3.3.0
 	github.com/pierrec/lz4 v2.4.1+incompatible // indirect
+	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
 	github.com/pingcap/parser v0.0.0-20190506092653-e336082eb825
+	github.com/pingcap/tidb v2.0.11+incompatible
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/satori/go.uuid v1.2.0
 	github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24
