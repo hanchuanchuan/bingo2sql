@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/hanchuanchuan/bingo2sql"
@@ -138,9 +139,19 @@ func (t *testParserSuite) SetFlashback(v bool) {
 	t.localConfig.Flashback = v
 }
 
+func (t *testParserSuite) SetMinimalUpdate(v bool) {
+	t.config.MinimalUpdate = v
+	t.localConfig.MinimalUpdate = v
+}
+
 func (t *testParserSuite) SetRemovePrimary(v bool) {
 	t.config.RemovePrimary = v
 	t.localConfig.RemovePrimary = v
+}
+
+func (t *testParserSuite) SetSQLType(v string) {
+	t.config.SqlType = v
+	t.localConfig.SqlType = v
 }
 
 func (t *testParserSuite) setupTest(c *C, flavor string) {
@@ -442,6 +453,58 @@ func (t *testParserSuite) TestSync(c *C) {
 
 }
 
+func (t *testParserSuite) TestStopTime(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_replication`,
+		`CREATE TABLE test_replication (
+			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+			str VARCHAR(256),
+			f FLOAT,
+			d DOUBLE,
+			de DECIMAL(10,2),
+			i INT,
+			bi BIGINT,
+			e enum ("e1", "e2"),
+			b BIT(8),
+			y YEAR,
+			da DATE,
+			ts TIMESTAMP,
+			dt DATETIME,
+			tm TIME,
+			t TEXT,
+			bb BLOB,
+			se SET('a', 'b', 'c'),
+			PRIMARY KEY (id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8`)
+
+	//use row format
+	t.testExecute(c,
+		`INSERT INTO test_replication (str, f, i, e, b, y, da, ts, dt, tm, de, t, bb, se)
+		VALUES ("3", -3.14, 10, "e1", 0b0011, 1985,
+		"2012-05-07", "2012-05-07 14:01:01", "2012-05-07 14:01:01",
+		"14:01:01", -45363.64, "abc", "12345", "a,b")`)
+
+	t.config.StartTime = time.Now().Add(-10 * time.Minute).Format("2006-01-02 15:04")
+	t.localConfig.StartTime = t.config.StartTime
+	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(1,'3',-3.14,NULL,-45363.64,10,NULL,1,3,1985,'2012-05-07','2012-05-07 14:01:01','2012-05-07 14:01:01','14:01:01','abc','12345',3);")
+
+	t.config.StopTime = time.Now().Add(-5 * time.Minute).Format("2006-01-02 15:04")
+	t.localConfig.StopTime = t.config.StopTime
+	t.SetFlashback(true)
+	// 时间限制范围内无数据
+	t.checkBinlog(c)
+
+	t.config.StopTime = time.Now().Add(time.Minute).Format("2006-01-02 15:04:05")
+	t.localConfig.StopTime = t.config.StopTime
+	t.checkBinlog(c, "DELETE FROM `test`.`test_replication` WHERE `id`=1;")
+
+	t.SetFlashback(false)
+	t.SetRemovePrimary(true)
+	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES('3',-3.14,NULL,-45363.64,10,NULL,1,3,1985,'2012-05-07','2012-05-07 14:01:01','2012-05-07 14:01:01','14:01:01','abc','12345',3);")
+
+}
 func (t *testParserSuite) TestGeometry(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
@@ -505,7 +568,7 @@ func (t *testParserSuite) TestDatetime(c *C) {
 	)
 }
 
-func (t *testParserSuite) TestMinimal(c *C) {
+func (t *testParserSuite) TestBinlogRowImageMinimal(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
 	id := 100
@@ -515,21 +578,73 @@ func (t *testParserSuite) TestMinimal(c *C) {
 		fmt.Sprintf(`UPDATE test_replication SET f = -12.14, de = 555.34 WHERE id = %d`, id),
 		fmt.Sprintf(`DELETE FROM test_replication WHERE id = %d`, id))
 
+	t.SetSQLType("update")
+
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `id`=NULL, `str`=NULL, `f`=-12.14, `d`=NULL, `de`=555.34, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id`=100;")
+
+	t.SetFlashback(true)
+	t.SetMinimalUpdate(true)
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `id`=100, `f`=NULL, `de`=NULL WHERE `id` IS NULL;",
+	)
+
+	t.SetFlashback(false)
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `id`=NULL, `f`=-12.14, `de`=555.34 WHERE `id`=100;",
+	)
+
+	t.testExecute(c, "SET SESSION binlog_row_image = 'FULL'")
+
+}
+
+func (t *testParserSuite) TestMinimalUpdate(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	id := 100
+	t.testExecute(c, `RESET MASTER;`,
+		fmt.Sprintf(`INSERT INTO test_replication (id, str, f, i, bb, de) VALUES (%d, "4", -3.14, 100, "abc", -45635.64)`, id),
+		fmt.Sprintf(`UPDATE test_replication SET f = -12.14, de = 555.34 WHERE id = %d`, id),
+		fmt.Sprintf(`DELETE FROM test_replication WHERE id = %d`, id))
+
+	t.SetSQLType("update")
+
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `id`=100, `str`='4', `f`=-12.14, `d`=NULL, `de`=555.34, `i`=100, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`='abc', `se`=NULL WHERE `id`=100;")
+
+	t.SetFlashback(true)
+	t.SetMinimalUpdate(true)
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `f`=-3.14, `de`=-45635.64 WHERE `id`=100;",
+	)
+
+	t.SetFlashback(false)
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `f`=-12.14, `de`=555.34 WHERE `id`=100;",
+	)
+}
+
+func (t *testParserSuite) TestRemovePrimary(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	id := 100
+	t.testExecute(c, `RESET MASTER;`,
+		fmt.Sprintf(`INSERT INTO test_replication (id, str, f, i, bb, de) VALUES (%d, "4", -3.14, 100, "abc", -45635.64)`, id),
+		fmt.Sprintf(`DELETE FROM test_replication WHERE id = %d`, id))
+
 	t.checkBinlog(c, "INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(100,'4',-3.14,NULL,-45635.64,100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'abc',NULL);",
-		"UPDATE `test`.`test_replication` SET `id`=NULL, `str`=NULL, `f`=-12.14, `d`=NULL, `de`=555.34, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id`=100;",
 		"DELETE FROM `test`.`test_replication` WHERE `id`=100;")
 
 	t.SetFlashback(true)
 	t.checkBinlog(c,
 		"DELETE FROM `test`.`test_replication` WHERE `id`=100;",
-		"UPDATE `test`.`test_replication` SET `id`=100, `str`=NULL, `f`=NULL, `d`=NULL, `de`=NULL, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id` IS NULL;",
-		"INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);")
+		"INSERT INTO `test`.`test_replication`(`id`,`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES(100,'4',-3.14,NULL,-45635.64,100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'abc',NULL);",
+	)
 
 	t.SetFlashback(false)
 	t.SetRemovePrimary(true)
 	t.checkBinlog(c,
 		"INSERT INTO `test`.`test_replication`(`str`,`f`,`d`,`de`,`i`,`bi`,`e`,`b`,`y`,`da`,`ts`,`dt`,`tm`,`t`,`bb`,`se`) VALUES('4',-3.14,NULL,-45635.64,100,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'abc',NULL);",
-		"UPDATE `test`.`test_replication` SET `id`=NULL, `str`=NULL, `f`=-12.14, `d`=NULL, `de`=555.34, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=NULL WHERE `id`=100;",
 		"DELETE FROM `test`.`test_replication` WHERE `id`=100;")
 
 }

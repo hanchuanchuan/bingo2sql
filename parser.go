@@ -22,6 +22,7 @@ import (
 	"github.com/hanchuanchuan/go-mysql/mysql"
 	"github.com/hanchuanchuan/go-mysql/replication"
 	"github.com/jinzhu/gorm"
+	"github.com/jinzhu/now"
 	"github.com/juju/errors"
 	"github.com/mholt/archiver/v3"
 	uuid "github.com/satori/go.uuid"
@@ -786,8 +787,6 @@ func (p *MyBinlogParser) parserInit() error {
 
 	defer timeTrack(time.Now(), "parserInit")
 
-	var err error
-
 	if len(p.outputFileName) > 0 {
 		var err error
 		if Exists(p.outputFileName) {
@@ -811,12 +810,18 @@ func (p *MyBinlogParser) parserInit() error {
 	}
 
 	if p.cfg.StartTime != "" {
-		p.startTimestamp, err = timeParseToUnix(p.cfg.StartTime)
-		p.checkError(err)
+		t, err := now.Parse(p.cfg.StartTime)
+		if err != nil {
+			return err
+		}
+		p.startTimestamp = uint32(t.Unix())
 	}
 	if p.cfg.StopTime != "" {
-		p.stopTimestamp, err = timeParseToUnix(p.cfg.StopTime)
-		p.checkError(err)
+		t, err := now.Parse(p.cfg.StopTime)
+		if err != nil {
+			return err
+		}
+		p.stopTimestamp = uint32(t.Unix())
 	}
 
 	// 如果未指定开始文件,就自动解析

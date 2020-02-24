@@ -155,7 +155,6 @@ func runParse() {
 		log.Error(err)
 		return
 	} else {
-		cfg.BeginTime = time.Now().Unix()
 		err = p.Parser()
 		if err != nil {
 			log.Error("binlog解析操作失败")
@@ -265,16 +264,14 @@ func parseBinlog(c echo.Context) error {
 			return c.JSON(http.StatusOK, out)
 		}
 	} else {
-		cfg.BeginTime = time.Now().Unix()
-
-		i := cfg.Id()
-		parserProcess[i] = p
+		id := cfg.Id()
+		parserProcess[id] = p
 		go func() {
-			defer delete(parserProcess, i)
+			defer delete(parserProcess, id)
 			p.Parser()
 		}()
 
-		r := map[string]string{"id": cfg.Id()}
+		r := map[string]string{"id": id}
 		return c.JSON(http.StatusOK, r)
 	}
 }
