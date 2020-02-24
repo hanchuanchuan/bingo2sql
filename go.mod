@@ -28,6 +28,8 @@ require (
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/spf13/pflag v1.0.5
 	github.com/valyala/fasttemplate v1.1.0 // indirect
+	github.com/youtube/vitess v2.1.1+incompatible // indirect
 	gopkg.in/ini.v1 v1.52.0
 	gopkg.in/mgo.v2 v2.0.0-20190816093944-a6b53ec6cb22 // indirect
+	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

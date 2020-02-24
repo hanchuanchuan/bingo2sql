@@ -98,41 +98,45 @@ type BinlogParserConfig struct {
 	User     string `json:"user" form:"user"`
 	Password string `json:"password" form:"password"`
 
+	// binlog文件,位置
 	StartFile     string `json:"start_file" form:"start_file"`
 	StopFile      string `json:"stop_file" form:"stop_file"`
 	StartPosition int    `json:"start_position" form:"start_position"`
 	StopPosition  int    `json:"stop_position" form:"stop_position"`
 
+	// 起止时间
 	StartTime string `json:"start_time" form:"start_time"`
 	StopTime  string `json:"stop_time" form:"stop_time"`
 
+	// 回滚
 	Flashback bool `json:"flashback" form:"flashback"`
 
+	// 解析DDL语句
 	ParseDDL bool `json:"parse_ddl" form:"parse_ddl"`
 
+	// 限制的数据库
 	Databases string `json:"databases" form:"databases"`
-	Tables    string `json:"tables" form:"tables"`
-	SqlType   string `json:"sql_type" form:"sql_type"`
-	MaxRows   int    `json:"max_rows" form:"max_rows"`
+	// 限制的表
+	Tables string `json:"tables" form:"tables"`
+	// sql类型
+	SqlType string `json:"sql_type" form:"sql_type"`
+	// 最大解析行数
+	MaxRows int `json:"max_rows" form:"max_rows"`
 
-	OnlyDatabases map[string]bool
-	OnlyTables    map[string]bool
-	SqlTypes      map[string]bool
-
+	// 输出到指定文件.为空时输出到控制台
 	OutputFileStr string
 
-	AllColumns bool `json:"all_columns" form:"all_columns"`
+	// 输出所有列(已弃用,有主键时均会使用主键)
+	// AllColumns bool `json:"all_columns" form:"all_columns"`
 
+	// debug模式,打印详细日志
 	Debug bool `json:"debug" form:"debug"`
-
-	SemiSync bool
-
-	RawMode bool
 
 	// websocket的用户名,用以发送进度提醒
 	SocketUser string `json:"socket_user" form:"socket_user"`
 
-	BeginTime int64
+	// 解析任务开始时间
+	beginTime int64
 
 	ThreadID uint32 `json:"thread_id" form:"thread_id"`
 
@@ -182,6 +186,10 @@ type baseParser struct {
 	// gtid []byte
 	// write interface{}
 
+	OnlyDatabases map[string]bool
+	OnlyTables    map[string]bool
+	SqlTypes      map[string]bool
+
 	// 本地解析模式.指定binlog文件和表结构本地解析
 	localMode bool
 }
@@ -218,6 +226,11 @@ type MyBinlogParser struct {
 
 	// 表结构缓存(仅用于本地解析)
 	tableCacheList map[string]*Table
+
+	// 解析用临时变量
+	currentPosition mysql.Position // 当前binlog位置
+	currentThreadID uint32         // 当前event线程号
+	changeRows      int            // 解析SQL行数
 }
 
 var (
@@ -239,7 +252,7 @@ func (cfg *BinlogParserConfig) Id() string {
 		s2 = strings.Replace(s2, " ", "_", -1)
 		s2 = strings.Replace(s2, ":", "", -1)
 	} else {
-		s2 = strconv.FormatInt(cfg.BeginTime, 10)
+		s2 = strconv.FormatInt(cfg.beginTime, 10)
 	}
 	return fmt.Sprintf("%s_%d_%s",
 		s1,
@@ -262,22 +275,7 @@ func (p *MyBinlogParser) Parser() error {
 
 	var wg sync.WaitGroup
 
-	// timeStart := time.Now()
 	defer timeTrack(time.Now(), "Parser")
-
-	// defer func() {
-	//     if err := recover(); err != nil {
-	//         if e, ok := err.(error); ok {
-	//             log.Error().Err(e).Msg("binlog解析操作失败")
-
-	//             if len(p.cfg.SocketUser) > 0 {
-	//                 kwargs := map[string]interface{}{"error": e.Error()}
-	//                 sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度",
-	//                     "", kwargs)
-	//             }
-	//         }
-	//     }
-	// }()
 
 	var err error
 
@@ -307,57 +305,42 @@ func (p *MyBinlogParser) Parser() error {
 		p.bufferWriter = bufio.NewWriter(p.outputFile)
 	}
 
-	// endPos := mysql.Position{
-	// 	Name: p.masterStatus.File,
-	// 	Pos:  uint32(p.masterStatus.Position)}
-
 	cfg := replication.BinlogSyncerConfig{
 		ServerID: 2000000111,
 		Flavor:   p.cfg.Flavor,
 
-		Host:            p.cfg.Host,
-		Port:            p.cfg.Port,
-		User:            p.cfg.User,
-		Password:        p.cfg.Password,
-		UseDecimal:      true,
-		RawModeEnabled:  p.cfg.RawMode,
-		SemiSyncEnabled: p.cfg.SemiSync,
+		Host:       p.cfg.Host,
+		Port:       p.cfg.Port,
+		User:       p.cfg.User,
+		Password:   p.cfg.Password,
+		UseDecimal: true,
+		// RawModeEnabled:  p.cfg.RawMode,
+		// SemiSyncEnabled: p.cfg.SemiSync,
 	}
 
 	b := replication.NewBinlogSyncer(cfg)
 	defer b.Close()
 
-	currentPosition := mysql.Position{
+	p.currentPosition = mysql.Position{
 		Name: p.startFile,
 		Pos:  uint32(p.cfg.StartPosition),
 	}
 
-	s, err := b.StartSync(currentPosition)
+	s, err := b.StartSync(p.currentPosition)
 	if err != nil {
 		log.Infof("Start sync error: %v\n", errors.ErrorStack(err))
 		return nil
 	}
 
-	changeRows := 0
-
 	sendTime := time.Now().Add(time.Second * 5)
 	sendCount := 0
-	var currentThreadID uint32
 
 	wg.Add(1)
 	go p.ProcessChan(&wg)
 
-	finishFlag := -1
 	var ctx context.Context
 	var cancel context.CancelFunc
 	for {
-
-		if !p.cfg.StopNever && finishFlag > -1 {
-			// 循环已结束
-			log.Info("binlog解析完成")
-			break
-		}
-
 		if p.cfg.StopNever {
 			ctx = context.Background()
 		} else {
@@ -378,175 +361,27 @@ func (p *MyBinlogParser) Parser() error {
 			break
 		}
 
-		if e.Header.LogPos > 0 {
-			currentPosition.Pos = e.Header.LogPos
+		ok, err := p.parseSingleEvent(e)
+		if err != nil {
+			return err
 		}
-
-		if e.Header.EventType == replication.ROTATE_EVENT {
-			if event, ok := e.Event.(*replication.RotateEvent); ok {
-				currentPosition = mysql.Position{
-					Name: string(event.NextLogName),
-					Pos:  uint32(event.Position)}
-			}
-		}
-
-		if !p.cfg.StopNever {
-			if e.Header.Timestamp > 0 {
-				if p.startTimestamp > 0 && e.Header.Timestamp < p.startTimestamp {
-					continue // goto CHECK_STOP
-				}
-				if p.stopTimestamp > 0 && e.Header.Timestamp > p.stopTimestamp {
-					log.Warn("已超出结束时间")
-					break
-				}
-			}
-
-			finishFlag = p.checkFinish(&currentPosition)
-			if finishFlag == 1 {
-				log.Error("is finish")
-				break
-			}
-		}
-
-		// 只需解析GTID返回内的event
-		if len(p.includeGtids) > 0 {
-			switch e.Header.EventType {
-			case replication.TABLE_MAP_EVENT, replication.QUERY_EVENT,
-				replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2,
-				replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2,
-				replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
-				status := p.isGtidEventInGtidSet()
-				if status == 1 {
-					continue // goto CHECK_STOP
-				} else if status == 2 {
-					log.Info("已超出GTID范围,自动结束")
-
-					if !p.cfg.StopNever {
-						break
-					}
-				}
-			}
-		}
-
-		switch event := e.Event.(type) {
-		case *replication.GTIDEvent:
-			if len(p.includeGtids) > 0 {
-				p.gtidEvent = event
-			}
-			// e.Dump(os.Stdout)
-			u, _ := uuid.FromBytes(event.SID)
-			p.gtid = append([]byte(u.String()), []byte(fmt.Sprintf(":%d", event.GNO))...)
-			// fmt.Println(p.gtid)
-		case *replication.TableMapEvent:
-			if !p.schemaFilter(event) {
-				continue
-			}
-			_, err = p.tableInformation(event.TableID, event.Schema, event.Table)
-			if err != nil {
-				return err
-			}
-		case *replication.QueryEvent:
-			if p.cfg.ThreadID > 0 {
-				currentThreadID = event.SlaveProxyID
-			}
-
-			// 回滚或者仅dml语句时 跳过
-			if p.cfg.Flashback || !p.cfg.ParseDDL {
-				continue // goto CHECK_STOP
-			}
-
-			if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
-				continue // goto CHECK_STOP
-			}
-
-			if string(event.Query) != "BEGIN" && string(event.Query) != "COMMIT" {
-				if len(event.Schema) > 0 {
-					p.write(append([]byte(fmt.Sprintf("USE `%s`;\n", event.Schema)), event.Query...), e)
-				}
-				// changeRows++
-			} else {
-				// fmt.Println(string(event.Query))
-				// log.Info("#start %d %d %d", e.Header.LogPos,
-				//  e.Header.LogPos+e.Header.EventSize,
-				//  e.Header.LogPos-e.Header.EventSize)
-				// if binlog_event.query == 'BEGIN':
-				//                    e_start_pos = last_pos
-			}
-		case *replication.RowsEvent:
-			if !p.schemaFilter(event.Table) {
-				continue // goto CHECK_STOP
-			}
-			if p.cfg.ThreadID > 0 && p.cfg.ThreadID != currentThreadID {
-				continue // goto CHECK_STOP
-			}
-			table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
-			if err != nil {
-				return err
-			}
-
-			switch e.Header.EventType {
-			case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
-				if _, ok := p.cfg.SqlTypes["insert"]; ok {
-					if p.cfg.Flashback {
-						_, err = p.generateDeleteSql(table, event, e)
-					} else {
-						_, err = p.generateInsertSql(table, event, e)
-					}
-					changeRows = changeRows + len(event.Rows)
-				}
-			case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
-				if _, ok := p.cfg.SqlTypes["delete"]; ok {
-					if p.cfg.Flashback {
-						_, err = p.generateInsertSql(table, event, e)
-					} else {
-						_, err = p.generateDeleteSql(table, event, e)
-					}
-					changeRows = changeRows + len(event.Rows)
-				}
-			case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
-				if _, ok := p.cfg.SqlTypes["update"]; ok {
-					_, err = p.generateUpdateSql(table, event, e)
-					changeRows = changeRows + len(event.Rows)/2
-				}
-			}
-
-			if err != nil {
-				return err
-			}
-
+		if !ok {
+			break
 		}
 
 		if len(p.cfg.SocketUser) > 0 {
 			// 如果指定了websocket用户,就每5s发送一次进度通知
-			if changeRows > sendCount && time.Now().After(sendTime) {
-				sendCount = changeRows
+			if p.changeRows > sendCount && time.Now().After(sendTime) {
+				sendCount = p.changeRows
 				sendTime = time.Now().Add(time.Second * 5)
 
-				kwargs := map[string]interface{}{"rows": changeRows}
+				kwargs := map[string]interface{}{"rows": p.changeRows}
 				if p.stopTimestamp > 0 && p.startTimestamp > 0 && p.stopTimestamp > p.startTimestamp {
 					kwargs["pct"] = (e.Header.Timestamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp)
 				}
 				go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
 
 			}
-		}
-
-		if p.cfg.MaxRows > 0 && changeRows >= p.cfg.MaxRows {
-			log.Info("已超出最大行数")
-			break
-		}
-
-		// 再次判断是否到结束位置,以免处在临界值,且无新日志时程序卡住
-		if e.Header.Timestamp > 0 {
-			if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
-				log.Warn("已超出结束时间")
-				break
-			}
-		}
-
-		if !p.running {
-			log.Warn("进程手动中止")
-			break
 		}
 	}
 
@@ -557,8 +392,8 @@ func (p *MyBinlogParser) Parser() error {
 	if len(p.cfg.SocketUser) > 0 {
 		p.outputFile.Close()
 
-		if changeRows > 0 {
-			kwargs := map[string]interface{}{"rows": changeRows}
+		if p.changeRows > 0 {
+			kwargs := map[string]interface{}{"rows": p.changeRows}
 			kwargs["pct"] = 99
 
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
@@ -590,7 +425,7 @@ func (p *MyBinlogParser) Parser() error {
 			p.clear()
 
 			log.Info("压缩完成")
-			kwargs = map[string]interface{}{"ok": "1", "pct": 100, "rows": changeRows,
+			kwargs = map[string]interface{}{"ok": "1", "pct": 100, "rows": p.changeRows,
 				"url": "/go/download/" + strings.Replace(url, "../", "", -1), "size": filesize}
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度",
 				"", kwargs)
@@ -792,12 +627,12 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 
 	p.write1 = p
 
-	cfg.BeginTime = time.Now().Unix()
+	cfg.beginTime = time.Now().Unix()
 	p.cfg = cfg
 
-	p.cfg.OnlyDatabases = make(map[string]bool)
-	p.cfg.OnlyTables = make(map[string]bool)
-	p.cfg.SqlTypes = make(map[string]bool)
+	p.OnlyDatabases = make(map[string]bool)
+	p.OnlyTables = make(map[string]bool)
+	p.SqlTypes = make(map[string]bool)
 
 	p.startFile = cfg.StartFile
 	p.stopFile = cfg.StopFile
@@ -1030,23 +865,23 @@ func (p *MyBinlogParser) parserInit() error {
 
 	if len(p.cfg.SqlType) > 0 {
 		for _, s := range strings.Split(p.cfg.SqlType, ",") {
-			p.cfg.SqlTypes[s] = true
+			p.SqlTypes[s] = true
 		}
 	} else {
-		p.cfg.SqlTypes["insert"] = true
-		p.cfg.SqlTypes["update"] = true
-		p.cfg.SqlTypes["delete"] = true
+		p.SqlTypes["insert"] = true
+		p.SqlTypes["update"] = true
+		p.SqlTypes["delete"] = true
 	}
 
 	if len(p.cfg.Databases) > 0 {
 		for _, s := range strings.Split(p.cfg.Databases, ",") {
-			p.cfg.OnlyDatabases[s] = true
+			p.OnlyDatabases[s] = true
 		}
 	}
 
 	if len(p.cfg.Tables) > 0 {
 		for _, s := range strings.Split(p.cfg.Tables, ",") {
-			p.cfg.OnlyTables[s] = true
+			p.OnlyTables[s] = true
 		}
 	}
 
@@ -1072,12 +907,12 @@ func (p *MyBinlogParser) getBinlogFirstTimestamp(file string) (uint32, error) {
 		ServerID: 2000000110,
 		Flavor:   p.cfg.Flavor,
 
-		Host:            p.cfg.Host,
-		Port:            p.cfg.Port,
-		User:            p.cfg.User,
-		Password:        p.cfg.Password,
-		RawModeEnabled:  p.cfg.RawMode,
-		SemiSyncEnabled: p.cfg.SemiSync,
+		Host:     p.cfg.Host,
+		Port:     p.cfg.Port,
+		User:     p.cfg.User,
+		Password: p.cfg.Password,
+		// RawModeEnabled:  p.cfg.RawMode,
+		// SemiSyncEnabled: p.cfg.SemiSync,
 	}
 
 	b := replication.NewBinlogSyncer(cfg)
@@ -1142,17 +977,17 @@ func (p *MyBinlogParser) checkError(e error) {
 }
 
 func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
-	if len(p.cfg.OnlyDatabases) == 0 && len(p.cfg.OnlyTables) == 0 {
+	if len(p.OnlyDatabases) == 0 && len(p.OnlyTables) == 0 {
 		return true
 	}
 
-	if len(p.cfg.OnlyDatabases) > 0 {
-		if _, ok := (p.cfg.OnlyDatabases)[string(table.Schema)]; !ok {
+	if len(p.OnlyDatabases) > 0 {
+		if _, ok := (p.OnlyDatabases)[string(table.Schema)]; !ok {
 			return false
 		}
 	}
-	if len(p.cfg.OnlyTables) > 0 {
-		if _, ok := (p.cfg.OnlyTables)[strings.ToLower(string(table.Table))]; !ok {
+	if len(p.OnlyTables) > 0 {
+		if _, ok := (p.OnlyTables)[strings.ToLower(string(table.Table))]; !ok {
 			return false
 		}
 	}
@@ -1563,17 +1398,18 @@ func (p *MyBinlogParser) tableInformation(tableId uint64, schema []byte, tableNa
 	newTable := new(Table)
 	newTable.tableId = tableId
 	newTable.Columns = allRecord
-	if !p.cfg.AllColumns {
-		if len(primarys) > 0 {
-			newTable.primarys = primarys
-			newTable.hasPrimary = true
-		} else if len(uniques) > 0 {
-			newTable.primarys = uniques
-			newTable.hasPrimary = true
-		} else {
-			newTable.hasPrimary = false
-		}
+
+	// if !p.cfg.AllColumns {
+	if len(primarys) > 0 {
+		newTable.primarys = primarys
+		newTable.hasPrimary = true
+	} else if len(uniques) > 0 {
+		newTable.primarys = uniques
+		newTable.hasPrimary = true
+	} else {
+		newTable.hasPrimary = false
 	}
+	// }
 
 	p.allTables[tableId] = newTable
 
@@ -2073,7 +1909,7 @@ func (p *MyBinlogParser) cacheNewTable(t *Table) {
 
 	key = strings.ToLower(key)
 
-	p.cfg.OnlyTables[strings.ToLower(t.TableName)] = true
+	p.OnlyTables[strings.ToLower(t.TableName)] = true
 	p.tableCacheList[key] = t
 }
 
@@ -2190,4 +2026,171 @@ func (t *Table) configPrimaryKey() {
 	} else {
 		t.hasPrimary = false
 	}
+}
+
+func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, err error) {
+	// 是否继续,默认为true
+	ok = true
+	finishFlag := -1
+
+	if e.Header.LogPos > 0 {
+		p.currentPosition.Pos = e.Header.LogPos
+	}
+
+	if e.Header.EventType == replication.ROTATE_EVENT {
+		if event, ok := e.Event.(*replication.RotateEvent); ok {
+			p.currentPosition = mysql.Position{
+				Name: string(event.NextLogName),
+				Pos:  uint32(event.Position)}
+		}
+	}
+
+	if !p.cfg.StopNever {
+		if e.Header.Timestamp > 0 {
+			if p.startTimestamp > 0 && e.Header.Timestamp < p.startTimestamp {
+				return
+			}
+			if p.stopTimestamp > 0 && e.Header.Timestamp > p.stopTimestamp {
+				log.Warn("已超出结束时间")
+				return false, nil
+			}
+		}
+
+		finishFlag = p.checkFinish(&p.currentPosition)
+		if finishFlag == 1 {
+			log.Error("is finish")
+			return false, nil
+		}
+	}
+
+	// 只需解析GTID返回内的event
+	if len(p.includeGtids) > 0 {
+		switch e.Header.EventType {
+		case replication.TABLE_MAP_EVENT, replication.QUERY_EVENT,
+			replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2,
+			replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2,
+			replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
+			status := p.isGtidEventInGtidSet()
+			if status == 1 {
+				return
+			} else if status == 2 {
+				log.Info("已超出GTID范围,自动结束")
+
+				if !p.cfg.StopNever {
+					return false, nil
+				}
+			}
+		}
+	}
+
+	switch event := e.Event.(type) {
+	case *replication.GTIDEvent:
+		if len(p.includeGtids) > 0 {
+			p.gtidEvent = event
+		}
+		// e.Dump(os.Stdout)
+		u, _ := uuid.FromBytes(event.SID)
+		p.gtid = append([]byte(u.String()), []byte(fmt.Sprintf(":%d", event.GNO))...)
+		// fmt.Println(p.gtid)
+	case *replication.TableMapEvent:
+		if !p.schemaFilter(event) {
+			return
+		}
+		_, err = p.tableInformation(event.TableID, event.Schema, event.Table)
+		if err != nil {
+			return false, err
+		}
+	case *replication.QueryEvent:
+		// 回滚或者仅dml语句时 跳过
+		if p.cfg.Flashback || !p.cfg.ParseDDL {
+			return
+		}
+
+		if p.cfg.ThreadID > 0 {
+			p.currentThreadID = event.SlaveProxyID
+			if p.cfg.ThreadID != p.currentThreadID {
+				return
+			}
+		}
+
+		if string(event.Query) != "BEGIN" && string(event.Query) != "COMMIT" {
+			if len(event.Schema) > 0 {
+				p.write(append([]byte(fmt.Sprintf("USE `%s`;\n", event.Schema)), event.Query...), e)
+			}
+			// changeRows++
+		} else {
+			// fmt.Println(string(event.Query))
+			// log.Info("#start %d %d %d", e.Header.LogPos,
+			//  e.Header.LogPos+e.Header.EventSize,
+			//  e.Header.LogPos-e.Header.EventSize)
+			// if binlog_event.query == 'BEGIN':
+			//                    e_start_pos = last_pos
+		}
+	case *replication.RowsEvent:
+		if !p.schemaFilter(event.Table) {
+			return
+		}
+		if p.cfg.ThreadID > 0 && p.cfg.ThreadID != p.currentThreadID {
+			return
+		}
+		table, err := p.tableInformation(event.TableID, event.Table.Schema, event.Table.Table)
+		if err != nil {
+			return false, err
+		}
+
+		switch e.Header.EventType {
+		case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
+			if _, ok := p.SqlTypes["insert"]; ok {
+				if p.cfg.Flashback {
+					_, err = p.generateDeleteSql(table, event, e)
+				} else {
+					_, err = p.generateInsertSql(table, event, e)
+				}
+				p.changeRows = p.changeRows + len(event.Rows)
+			}
+		case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
+			if _, ok := p.SqlTypes["delete"]; ok {
+				if p.cfg.Flashback {
+					_, err = p.generateInsertSql(table, event, e)
+				} else {
+					_, err = p.generateDeleteSql(table, event, e)
+				}
+				p.changeRows = p.changeRows + len(event.Rows)
+			}
+		case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
+			if _, ok := p.SqlTypes["update"]; ok {
+				_, err = p.generateUpdateSql(table, event, e)
+				p.changeRows = p.changeRows + len(event.Rows)/2
+			}
+		}
+
+		if err != nil {
+			return false, err
+		}
+
+	}
+
+	if p.cfg.MaxRows > 0 && p.changeRows >= p.cfg.MaxRows {
+		log.Info("已超出最大行数")
+		return false, nil
+	}
+
+	// 再次判断是否到结束位置,以免处在临界值,且无新日志时程序卡住
+	if e.Header.Timestamp > 0 {
+		if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
+			log.Warn("已超出结束时间")
+			return false, nil
+		}
+	}
+
+	if !p.running {
+		log.Warn("进程手动中止")
+		return false, nil
+	}
+
+	if finishFlag > -1 {
+		return false, nil
+	}
+
+	return
 }
