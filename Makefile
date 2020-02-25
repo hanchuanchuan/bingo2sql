@@ -58,7 +58,7 @@ all: server
 
 
 build:
-	$(GOBUILD)
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)' -o bin/$(PROJECT) cmd/bingo2sql.go
 
 # The retool tools.json is setup from hack/retool-install.sh
 check-setup:

@@ -13,7 +13,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	ini "gopkg.in/ini.v1"
+	"github.com/spf13/viper"
 )
 
 var parserProcess map[string]*parser.MyBinlogParser
@@ -166,16 +166,22 @@ func runParse() {
 
 // startServer 启动binlog解析服务
 func startServer() {
-	fmt.Println(*runServer)
-	cnf, err := ini.Load(*configFile)
-	if err != nil {
-		fmt.Println(fmt.Sprintf(`read config file %s error: %s`, *configFile, err.Error()))
+
+	viper := viper.New()
+	viper.SetConfigFile(*configFile)
+	viper.SetConfigType("ini")
+
+	if err := viper.ReadInConfig(); err != nil {
+		log.Fatalf("Error: %s", err.Error())
 		return
 	}
 
-	logDir := cnf.Section("Bingo").Key("log").String()
-	httpLogDir := cnf.Section("Bingo").Key("httplog").String()
+	// logDir := cnf.Section("Bingo").Key("log").String()
+	// httpLogDir := cnf.Section("Bingo").Key("httplog").String()
 	// level := cnf.Section("Bingo").Key("logLevel").String()
+
+	logDir := viper.GetString("Bingo.log")
+	httpLogDir := viper.GetString("Bingo.httplog")
 
 	//echo's output log file
 	elog, err := os.OpenFile(logDir, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -191,6 +197,16 @@ func startServer() {
 		return
 	}
 	defer httplog.Close()
+
+	// // 初始化Router
+	// r := mux.NewRouter()
+	// // // 静态文件路由
+	// // r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(dir))))
+	// // 普通路由
+	// r.HandleFunc("/", HomeHandler)
+
+	// r.Use(TestMiddleware)
+	// http.ListenAndServe(":3000", r)
 
 	// lvl, _ := zerolog.ParseLevel(level)
 	// zerolog.SetGlobalLevel(lvl)
@@ -229,6 +245,20 @@ func startServer() {
 
 	// router.Logger.Fatal(router.Start(addr))
 	router.Logger.Fatal(router.Start(":8077"))
+}
+
+func TestMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Do stuff here
+		fmt.Println("middleware print: ", r.RequestURI)
+		// Call the next handler, which can be another middleware in the chain, or the final handler.
+		next.ServeHTTP(w, r)
+	})
+}
+
+func HomeHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "this is home")
 }
 
 func parseBinlog(c echo.Context) error {
@@ -277,31 +307,6 @@ func parseBinlog(c echo.Context) error {
 		return c.JSON(http.StatusOK, r)
 	}
 }
-
-// func parseBinlogWork(c echo.Context) error {
-
-// 	m := echo.Map{}
-// 	if err := c.Bind(&m); err != nil {
-// 		return err
-// 	}
-
-// 	socket_user, _ := m["socket_user"]
-
-// 	work_id := c.Param("work_id")
-// 	str_db_id := c.Param("db_id")
-
-// 	db_id, _ := strconv.Atoi(str_db_id)
-
-// 	r := make(map[string]string)
-
-// 	err := parser.ProcessWork(work_id, db_id, socket_user.(string))
-// 	if err != nil {
-// 		r["error"] = err.Error()
-// 	} else {
-// 		r["ok"] = "1"
-// 	}
-// 	return c.JSON(http.StatusOK, r)
-// }
 
 func parseBinlogStop(c echo.Context) error {
 	id := c.Param("id")

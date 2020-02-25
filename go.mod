@@ -37,7 +37,7 @@ require (
 	github.com/ugorji/go v1.1.7 // indirect
 	github.com/youtube/vitess v2.1.1+incompatible // indirect
 	golang.org/x/sys v0.0.0-20200223170610-d5e6a3e2c0ae // indirect
-	gopkg.in/ini.v1 v1.52.0
+	gopkg.in/ini.v1 v1.52.0 // indirect
 	gopkg.in/mgo.v2 v2.0.0-20190816093944-a6b53ec6cb22 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.2.8 // indirect
