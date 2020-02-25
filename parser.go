@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -23,7 +24,6 @@ import (
 	"github.com/hanchuanchuan/go-mysql/replication"
 	"github.com/jinzhu/gorm"
 	"github.com/jinzhu/now"
-	"github.com/juju/errors"
 	"github.com/mholt/archiver/v3"
 	uuid "github.com/satori/go.uuid"
 	"github.com/shopspring/decimal"
@@ -329,7 +329,7 @@ func (p *MyBinlogParser) Parser() error {
 
 	s, err := b.StartSync(p.currentPosition)
 	if err != nil {
-		log.Infof("Start sync error: %v\n", errors.ErrorStack(err))
+		log.Infof("Start sync error: %v\n", err)
 		return nil
 	}
 
@@ -358,7 +358,7 @@ func (p *MyBinlogParser) Parser() error {
 			//  log.Info("===============")
 			//  log.Info(e.Header.EventType)
 			// }
-			log.Errorf("Get event error: %v\n", errors.ErrorStack(err))
+			log.Errorf("Get event error: %v\n", err)
 			break
 		}
 
@@ -953,7 +953,7 @@ func (p *MyBinlogParser) getBinlogFirstTimestamp(file string) (uint32, error) {
 // 使用下面这个错误检查方法可以方便一点
 func check(e error) {
 	if e != nil {
-		panic(errors.ErrorStack(e))
+		panic(e)
 	}
 }
 
@@ -977,7 +977,7 @@ func (p *MyBinlogParser) checkError(e error) {
 			sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度",
 				"", kwargs)
 		}
-		panic(errors.ErrorStack(e))
+		panic(e)
 	}
 }
 
@@ -1003,7 +1003,7 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
 	var buf []byte
 	if len(t.Columns) < int(e.ColumnCount) {
-		return "", errors.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
+		return "", fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
 			e.Table.Schema, e.Table.Table, len(t.Columns), e.ColumnCount)
 	}
 
@@ -1060,7 +1060,7 @@ func (p *MyBinlogParser) generateDeleteSql(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
 	var buf []byte
 	if len(t.Columns) < int(e.ColumnCount) {
-		return "", errors.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
+		return "", fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
 			e.Table.Schema, e.Table.Table, len(t.Columns), e.ColumnCount)
 	}
 
@@ -1170,7 +1170,7 @@ func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
 	var buf []byte
 	if len(t.Columns) < int(e.ColumnCount) {
-		return "", errors.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
+		return "", fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
 			e.Table.Schema, e.Table.Table, len(t.Columns), e.ColumnCount)
 	}
 
