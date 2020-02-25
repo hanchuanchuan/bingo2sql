@@ -5,10 +5,12 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"time"
 
-	"github.com/gin-gonic/gin"
 	parser "github.com/hanchuanchuan/bingo2sql"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	ini "gopkg.in/ini.v1"
@@ -198,106 +200,83 @@ func startServer() {
 
 	// log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	router := gin.Default()
+	//new echo
+	router := echo.New()
+	router.Server.WriteTimeout = time.Duration(30) * time.Second
 
-	// This handler will match /user/john but will not match /user/ or /user
-	router.GET("/user/:name", func(c *gin.Context) {
-		name := c.Param("name")
-		c.String(http.StatusOK, "Hello %s", name)
-	})
+	// Middleware
+	router.Use(middleware.Logger())
+	router.Use(middleware.Recover())
 
-	log.Info(`parse binlog tool is started`)
-
-	router.GET("/", func(c *gin.Context) {
-		log.Infof("%#v", c)
-		// return c.String(http.StatusOK, "Hello, World!\n")
-	})
-
-	// router.POST("/go/mysql/binlog/parse", parseBinlog)
-
-	// router.POST("/go/mysql/binlog/parse_stop/:id", parseBinlogStop)
-
-	// router.GET("/go/download/files/:name", download)
-
-	// e.POST("/go/mysql/binlog/parse_work/:work_id/:db_id", parseBinlogWork)
-
-	// e.Logger.Fatal(e.Start(addr))
-	// router.Logger.Fatal(router.Run(":8077"))
-	router.Run(":8077")
-
-	// //new echo
-	// router := echo.New()
-	// router.Server.WriteTimeout = time.Duration(30) * time.Second
-
-	// // Middleware
+	// Middleware
 	// router.Use(middleware.LoggerWithConfig(
 	// 	middleware.LoggerConfig{Output: httplog, Format: requestHeader}))
 	// router.Use(middleware.Recover())
 
-	// log.Info(`parse binlog tool is started`)
+	log.Info(`parse binlog tool is started`)
 
-	// router.GET("/", func(c echo.Context) error {
-	// 	return c.String(http.StatusOK, "Hello, World!\n")
-	// })
+	router.GET("/", func(c echo.Context) error {
+		return c.String(http.StatusOK, "Hello, World!\n")
+	})
 
-	// router.POST("/go/mysql/binlog/parse", parseBinlog)
+	router.POST("/go/mysql/binlog/parse", parseBinlog)
 
-	// router.POST("/go/mysql/binlog/parse_stop/:id", parseBinlogStop)
+	router.POST("/go/mysql/binlog/parse_stop/:id", parseBinlogStop)
 
-	// router.GET("/go/download/files/:name", download)
+	router.GET("/go/download/files/:name", download)
 
-	// // e.POST("/go/mysql/binlog/parse_work/:work_id/:db_id", parseBinlogWork)
+	// router.POST("/go/mysql/binlog/parse_work/:work_id/:db_id", parseBinlogWork)
 
-	// // e.Logger.Fatal(e.Start(addr))
-	// router.Logger.Fatal(router.Start(":8077"))
+	// router.Logger.Fatal(router.Start(addr))
+	router.Logger.Fatal(router.Start(":8077"))
 }
 
-// func parseBinlog(c echo.Context) error {
-// 	cfg := new(parser.BinlogParserConfig)
+func parseBinlog(c echo.Context) error {
+	cfg := new(parser.BinlogParserConfig)
 
-// 	if err := c.Bind(cfg); err != nil {
-// 		return err
-// 	}
+	if err := c.Bind(cfg); err != nil {
+		return err
+	}
 
-// 	fmt.Println(cfg)
-// 	fmt.Printf("%#v\n", cfg)
+	fmt.Println(cfg)
+	fmt.Printf("%#v\n", cfg)
 
-// 	if cfg.InsID == 0 {
-// 		r := map[string]string{"error": "请指定数据库地址"}
-// 		return c.JSON(http.StatusOK, r)
-// 	}
+	if cfg.InsID == 0 {
+		r := map[string]string{"error": "请指定数据库地址"}
+		return c.JSON(http.StatusOK, r)
+	}
 
-// 	p, err := parser.NewBinlogParser(cfg)
-// 	if err != nil {
-// 		log.Error("binlog解析操作失败")
-// 		log.Error(err)
-// 		out := map[string]string{"error": err.Error()}
-// 		return c.JSON(http.StatusOK, out)
-// 	}
+	p, err := parser.NewBinlogParser(cfg)
+	if err != nil {
+		log.Error("binlog解析操作失败")
+		log.Error(err)
+		out := map[string]string{"error": err.Error()}
+		return c.JSON(http.StatusOK, out)
+	}
 
-// 	if err := recover(); err != nil {
+	if err := recover(); err != nil {
 
-// 		if e, ok := err.(error); ok {
-// 			log.Error("binlog解析操作失败")
-// 			log.Error(err)
-// 			out := map[string]string{"error": e.Error()}
-// 			return c.JSON(http.StatusOK, out)
-// 		} else {
-// 			out := map[string]string{"error": "未知的错误"}
-// 			return c.JSON(http.StatusOK, out)
-// 		}
-// 	} else {
-// 		id := cfg.Id()
-// 		parserProcess[id] = p
-// 		go func() {
-// 			defer delete(parserProcess, id)
-// 			p.Parser()
-// 		}()
+		if e, ok := err.(error); ok {
+			log.Error("binlog解析操作失败")
+			log.Error(err)
+			out := map[string]string{"error": e.Error()}
+			return c.JSON(http.StatusOK, out)
+		} else {
+			out := map[string]string{"error": "未知的错误"}
+			return c.JSON(http.StatusOK, out)
+		}
+	} else {
+		id := cfg.Id()
+		parserProcess[id] = p
+		go func() {
+			defer delete(parserProcess, id)
+			p.Parser()
+		}()
 
-// 		r := map[string]string{"id": id}
-// 		return c.JSON(http.StatusOK, r)
-// 	}
-// }
+		r := map[string]string{"id": id}
+		return c.JSON(http.StatusOK, r)
+	}
+}
 
 // func parseBinlogWork(c echo.Context) error {
 
@@ -324,49 +303,49 @@ func startServer() {
 // 	return c.JSON(http.StatusOK, r)
 // }
 
-// func parseBinlogStop(c echo.Context) error {
-// 	id := c.Param("id")
-// 	r := make(map[string]string)
+func parseBinlogStop(c echo.Context) error {
+	id := c.Param("id")
+	r := make(map[string]string)
 
-// 	if len(id) == 0 {
-// 		r["error"] = "无效参数!"
-// 		return c.JSON(http.StatusOK, r)
-// 	}
+	if len(id) == 0 {
+		r["error"] = "无效参数!"
+		return c.JSON(http.StatusOK, r)
+	}
 
-// 	log.Print("当前解析进程数量: ", len(parserProcess))
+	log.Print("当前解析进程数量: ", len(parserProcess))
 
-// 	defer delete(parserProcess, id)
+	defer delete(parserProcess, id)
 
-// 	if p, ok := parserProcess[id]; ok {
-// 		p.Stop()
+	if p, ok := parserProcess[id]; ok {
+		p.Stop()
 
-// 		r["ok"] = "1"
-// 		return c.JSON(http.StatusOK, r)
-// 	} else {
-// 		r["ok"] = "2"
-// 		return c.JSON(http.StatusOK, r)
-// 	}
-// }
+		r["ok"] = "1"
+		return c.JSON(http.StatusOK, r)
+	} else {
+		r["ok"] = "2"
+		return c.JSON(http.StatusOK, r)
+	}
+}
 
-// func download(c echo.Context) error {
-// 	path := c.Param("name")
+func download(c echo.Context) error {
+	path := c.Param("name")
 
-// 	log.Infof("下载路径: %s", path)
+	log.Infof("下载路径: %s", path)
 
-// 	path = "../files/" + path
+	path = "../files/" + path
 
-// 	return c.Attachment(path, c.Param("name"))
+	return c.Attachment(path, c.Param("name"))
 
-// 	// _, err := os.Stat(path)
-// 	// if err == nil || os.IsExist(err) {
-// 	// } else {
+	// _, err := os.Stat(path)
+	// if err == nil || os.IsExist(err) {
+	// } else {
 
-// 	// }
+	// }
 
-// 	// return c.Inline(path, c.Param("name"))
+	// return c.Inline(path, c.Param("name"))
 
-// 	// return c.File(path)
-// }
+	// return c.File(path)
+}
 
 func flagBoolean(name string, shorthand string, defaultVal bool, usage string) *bool {
 	if defaultVal == false {

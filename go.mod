@@ -6,8 +6,9 @@ go 1.13
 
 require (
 	github.com/frankban/quicktest v1.7.2 // indirect
-	github.com/gin-gonic/gin v1.5.0
 	github.com/go-sql-driver/mysql v1.4.1
+	github.com/golang/protobuf v1.3.2 // indirect
+	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/hanchuanchuan/go-mysql v0.0.0-20200114082439-6d0d8d3a982e
 	github.com/hanchuanchuan/goInception v1.2.0
 	github.com/imroc/req v0.3.0
@@ -16,6 +17,8 @@ require (
 	github.com/juju/errors v0.0.0-20190930114154-d42613fe1ab9
 	github.com/juju/loggo v0.0.0-20190526231331-6e530bcce5d8 // indirect
 	github.com/juju/testing v0.0.0-20191001232224-ce9dec17d28b // indirect
+	github.com/klauspost/compress v1.9.7 // indirect
+	github.com/labstack/echo/v4 v4.1.14
 	github.com/mholt/archiver/v3 v3.3.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pelletier/go-toml v1.6.0 // indirect
@@ -31,6 +34,7 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.6.2
+	github.com/ugorji/go v1.1.7 // indirect
 	github.com/youtube/vitess v2.1.1+incompatible // indirect
 	golang.org/x/sys v0.0.0-20200223170610-d5e6a3e2c0ae // indirect
 	gopkg.in/ini.v1 v1.52.0
