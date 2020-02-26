@@ -18,6 +18,12 @@ import (
 
 var parserProcess map[string]*parser.MyBinlogParser
 
+type ParseInfo struct {
+	ID        string `json:"id"`
+	ParseRows int    `json:"parse_rows"`
+	Percent   int    `json:"percent"`
+}
+
 var (
 	logHeader     = `${time_rfc3339} ${prefix} ${level} ${short_file} ${line} `
 	requestHeader = `${time_rfc3339} ${remote_ip} ${method} ${uri} ${status} ${error} ${latency_human}` + "\n"
@@ -230,16 +236,26 @@ func startServer() {
 	// router.Use(middleware.Recover())
 
 	log.Info(`parse binlog tool is started`)
+	group := router.Group("/binlog")
 
-	router.GET("/", func(c echo.Context) error {
+	group.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!\n")
 	})
 
-	router.POST("/go/mysql/binlog/parse", parseBinlog)
+	// 发起binlog解析请求
+	group.POST("/parse", parseBinlog)
 
-	router.POST("/go/mysql/binlog/parse_stop/:id", parseBinlogStop)
+	// 解析进程的进度
+	group.GET("/parse/:id", getParseInfo)
 
-	router.GET("/go/download/files/:name", download)
+	// 获取所有解析
+	group.GET("/parse", getAllParse)
+
+	// 停止解析操作
+	group.DELETE("/parse/:id", parseBinlogStop)
+
+	// 下载解析生成的文件
+	group.GET("/parse/download/:id", download)
 
 	// router.POST("/go/mysql/binlog/parse_work/:work_id/:db_id", parseBinlogWork)
 
@@ -261,6 +277,45 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "this is home")
 }
 
+// getParseInfo 获取解析进程信息
+func getParseInfo(c echo.Context) error {
+	id := c.Param("id")
+
+	if len(id) == 0 {
+		return c.JSON(http.StatusOK, map[string]string{
+			"error": "无效参数!",
+		})
+	}
+
+	if p, ok := parserProcess[id]; ok {
+		data := &ParseInfo{
+			ID:        id,
+			ParseRows: p.ParseRows(),
+			Percent:   p.Percent(),
+		}
+		return c.JSON(http.StatusOK, data)
+	} else {
+		return c.JSON(http.StatusNotFound, "Not Found!")
+	}
+}
+
+// getAllParse 获取所有进程信息
+func getAllParse(c echo.Context) error {
+
+	log.Print("当前解析进程数量: ", len(parserProcess))
+
+	response := make([]*ParseInfo, 0, len(parserProcess))
+	for _, p := range parserProcess {
+		data := &ParseInfo{
+			ID:        p.Config().Id(),
+			ParseRows: p.ParseRows(),
+			Percent:   p.Percent(),
+		}
+		response = append(response, data)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
 func parseBinlog(c echo.Context) error {
 	cfg := new(parser.BinlogParserConfig)
 
@@ -270,6 +325,11 @@ func parseBinlog(c echo.Context) error {
 
 	fmt.Println(cfg)
 	fmt.Printf("%#v\n", cfg)
+
+	// 指定默认的socket用户,用来生成SQL文件
+	if cfg.SocketUser == "" {
+		cfg.SocketUser = "test"
+	}
 
 	// if cfg.InsID == 0 {
 	// 	r := map[string]string{"error": "请指定数据库地址"}
@@ -310,12 +370,14 @@ func parseBinlog(c echo.Context) error {
 
 func parseBinlogStop(c echo.Context) error {
 	id := c.Param("id")
-	r := make(map[string]string)
 
 	if len(id) == 0 {
-		r["error"] = "无效参数!"
-		return c.JSON(http.StatusOK, r)
+		return c.JSON(http.StatusOK, map[string]string{
+			"error": "无效参数!",
+		})
 	}
+
+	response := make(map[string]string)
 
 	log.Print("当前解析进程数量: ", len(parserProcess))
 
@@ -324,28 +386,28 @@ func parseBinlogStop(c echo.Context) error {
 	if p, ok := parserProcess[id]; ok {
 		p.Stop()
 
-		r["ok"] = "1"
-		return c.JSON(http.StatusOK, r)
+		response["ok"] = "1"
+		return c.JSON(http.StatusOK, response)
 	} else {
-		r["ok"] = "2"
-		return c.JSON(http.StatusOK, r)
+		response["ok"] = "2"
+		return c.JSON(http.StatusOK, response)
 	}
 }
 
 func download(c echo.Context) error {
-	path := c.Param("name")
+	id := c.Param("id")
+	path := "files/" + id + ".tar.gz"
 
-	log.Infof("下载路径: %s", path)
-
-	path = "../files/" + path
-
-	return c.Attachment(path, c.Param("name"))
-
-	// _, err := os.Stat(path)
-	// if err == nil || os.IsExist(err) {
-	// } else {
-
-	// }
+	_, err := os.Stat(path)
+	if err != nil {
+		log.Error(err)
+		return c.JSON(http.StatusNotFound,
+			fmt.Sprintf("%s no such file or directory", id))
+		// return err
+	} else {
+		log.Infof("下载路径: %s", path)
+		return c.Attachment(path, c.Param("name"))
+	}
 
 	// return c.Inline(path, c.Param("name"))
 

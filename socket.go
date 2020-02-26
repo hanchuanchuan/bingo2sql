@@ -43,6 +43,10 @@ func sendMsg(user string, event string, title string, text string, kwargs map[st
 		return true
 	}
 
+	if URL == "" {
+		return true
+	}
+
 	url := fmt.Sprintf("%s/room/%s", URL, user)
 
 	param := req.Param{

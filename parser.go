@@ -232,9 +232,10 @@ type MyBinlogParser struct {
 	tableCacheList map[string]*Table
 
 	// 解析用临时变量
-	currentPosition mysql.Position // 当前binlog位置
-	currentThreadID uint32         // 当前event线程号
-	changeRows      int            // 解析SQL行数
+	currentPosition  mysql.Position // 当前binlog位置
+	currentThreadID  uint32         // 当前event线程号
+	changeRows       int            // 解析SQL行数
+	currentTimtstamp uint32         // 当前解析到的时间戳
 }
 
 var (
@@ -250,6 +251,9 @@ func init() {
 func (cfg *BinlogParserConfig) Id() string {
 
 	s1 := strings.Replace(cfg.Host, ".", "_", -1)
+	if len(s1) > 20 {
+		s1 = s1[:20]
+	}
 	var s2 string
 	if len(cfg.StartTime) > 0 {
 		s2 = strings.Replace(cfg.StartTime, ".", "_", -1)
@@ -646,24 +650,27 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	}
 
 	if len(cfg.SocketUser) > 0 {
-		var fileName []string
-		fileName = append(fileName, strings.Replace(cfg.Host, ".", "_", -1))
-		fileName = append(fileName, strconv.Itoa(int(cfg.Port)))
-		if cfg.Databases != "" {
-			fileName = append(fileName, cfg.Databases)
-		}
-		if cfg.Tables != "" {
-			fileName = append(fileName, cfg.Tables)
-		}
+		p.outputFileName = fmt.Sprintf("files/%s.sql", p.cfg.Id())
 
-		fileName = append(fileName, time.Now().Format("20060102_1504"))
+		// p.outputFileName = fmt.Sprintf("files/%s_%s.sql", time.Now().Format("20060102_1504"), p.cfg.Id())
 
-		if cfg.Flashback {
-			fileName = append(fileName, "rollback")
-		}
+		// var fileName []string
+		// fileName = append(fileName, strings.Replace(cfg.Host, ".", "_", -1))
+		// fileName = append(fileName, strconv.Itoa(int(cfg.Port)))
+		// if cfg.Databases != "" {
+		// 	fileName = append(fileName, cfg.Databases)
+		// }
+		// if cfg.Tables != "" {
+		// 	fileName = append(fileName, cfg.Tables)
+		// }
 
-		// p.outputFileName = fmt.Sprintf("files/%d.sql", time.Now().Unix())
-		p.outputFileName = fmt.Sprintf("files/%s.sql", strings.Join(fileName, "_"))
+		// fileName = append(fileName, time.Now().Format("20060102_1504"))
+
+		// if cfg.Flashback {
+		// 	fileName = append(fileName, "rollback")
+		// }
+
+		// p.outputFileName = fmt.Sprintf("files/%s.sql", strings.Join(fileName, "_"))
 	} else {
 		if cfg.OutputFileStr != "" {
 			p.outputFileName = cfg.OutputFileStr
@@ -2073,6 +2080,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 	}
 
 	if !p.cfg.StopNever {
+
 		if e.Header.Timestamp > 0 {
 			if p.startTimestamp > 0 && e.Header.Timestamp < p.startTimestamp {
 				return
@@ -2082,6 +2090,8 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 				return false, nil
 			}
 		}
+
+		p.currentTimtstamp = e.Header.Timestamp
 
 		finishFlag = p.checkFinish(&p.currentPosition)
 		if finishFlag == 1 {
@@ -2220,4 +2230,40 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 	}
 
 	return
+}
+
+// ParseRows 获取已解析行数
+func (p *MyBinlogParser) Config() *BinlogParserConfig {
+	return p.cfg
+}
+
+// ParseRows 获取已解析行数
+func (p *MyBinlogParser) ParseRows() int {
+	return p.changeRows
+}
+
+// Percent 获取解析百分比
+func (p *MyBinlogParser) Percent() int {
+	if p.cfg.StartFile != "" && p.cfg.StartFile == p.cfg.StopFile {
+		if p.cfg.StopPosition > 0 {
+			return (int(p.currentPosition.Pos) - p.cfg.StartPosition) * 100 / (p.cfg.StopPosition - p.cfg.StartPosition)
+		}
+	}
+
+	if p.stopTimestamp > 0 {
+		if p.currentTimtstamp < p.startTimestamp {
+			return 0
+		} else {
+			return int((p.currentTimtstamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp))
+		}
+	}
+
+	if p.cfg.MaxRows > 0 {
+		if p.changeRows < p.cfg.MaxRows {
+			return p.changeRows / p.cfg.MaxRows * 100
+		}
+		return 100
+	}
+
+	return 0
 }
