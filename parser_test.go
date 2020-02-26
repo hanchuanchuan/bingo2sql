@@ -154,6 +154,11 @@ func (t *testParserSuite) SetSQLType(v string) {
 	t.localConfig.SqlType = v
 }
 
+func (t *testParserSuite) SetIncludeGtids(v string) {
+	t.config.IncludeGtids = v
+	t.localConfig.IncludeGtids = v
+}
+
 func (t *testParserSuite) setupTest(c *C, flavor string) {
 	var port uint16 = 3306
 	switch flavor {
@@ -197,6 +202,26 @@ func (t *testParserSuite) setupTest(c *C, flavor string) {
 	// }
 
 	// t.b = NewBinlogSyncer(cfg)
+}
+
+func (t *testParserSuite) getThreadID(c *C) uint32 {
+	result, err := t.c.Execute("select connection_id()")
+	c.Assert(err, IsNil)
+
+	threadID, err := result.GetInt(0, 0)
+	c.Assert(err, IsNil)
+	log.Errorf("%#v", threadID)
+	return uint32(threadID)
+}
+
+func (t *testParserSuite) getServerUUID(c *C) string {
+	result, err := t.c.Execute("show variables like 'server_uuid'")
+	c.Assert(err, IsNil)
+
+	uuid, err := result.GetString(0, 1)
+	c.Assert(err, IsNil)
+	log.Errorf("%#v", uuid)
+	return uuid
 }
 
 // func (t *testParserSuite) testPositionSync(c *C) {
@@ -711,6 +736,124 @@ func (t *testParserSuite) TestRemovePrimary(c *C) {
 
 }
 
+// TestThreadID 测试指定线程号,操作后断开重连
+func (t *testParserSuite) TestThreadID(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_simple`,
+		`CREATE TABLE test_simple (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 varchar(100),
+				c2 int,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`)
+
+	t.testExecute(c,
+		`INSERT INTO test_simple (c1, c2) VALUES ('test',1)`,
+		`DELETE FROM test_simple WHERE id > 0`)
+
+	threadID := t.getThreadID(c)
+
+	if t.c != nil {
+		t.c.Close()
+		t.c = nil
+	}
+
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c,
+		`INSERT INTO test_simple (c1, c2) VALUES ('test2',2)`,
+		`DELETE FROM test_simple WHERE id > 0`)
+
+	// 未限制线程号时返回所有数据
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(2,'test2',2);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=2;")
+
+	t.config.ThreadID = threadID
+	t.localConfig.ThreadID = t.config.ThreadID
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;")
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);",
+	)
+
+}
+
+// TestThreadID 测试指定线程号,操作后断开重连
+func (t *testParserSuite) TestGTID(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_simple`,
+		`CREATE TABLE test_simple (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 varchar(100),
+				c2 int,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`)
+
+	t.testExecute(c,
+		`INSERT INTO test_simple (c1, c2) VALUES ('test',1)`,
+		`DELETE FROM test_simple WHERE id > 0`)
+
+	t.testExecute(c,
+		`INSERT INTO test_simple (c1, c2) VALUES ('test2',2)`,
+		`DELETE FROM test_simple WHERE id > 0`)
+
+	uuid := t.getServerUUID(c)
+
+	// ---- 错误GTID ----
+
+	t.SetIncludeGtids("123")
+	_, err := bingo2sql.NewBinlogParser(&t.config)
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
+
+	t.SetIncludeGtids(uuid)
+	_, err = bingo2sql.NewBinlogParser(&t.localConfig)
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
+
+	t.SetIncludeGtids(uuid + ":abc")
+	_, err = bingo2sql.NewBinlogParser(&t.localConfig)
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "GTID解析失败!(strconv.ParseInt: parsing \"abc\": invalid syntax)")
+
+	// ------ end ------
+
+	t.SetIncludeGtids(uuid + ":3")
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);")
+
+	t.SetIncludeGtids(uuid + ":3-4")
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;")
+
+	t.SetIncludeGtids(uuid + ":5")
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(2,'test2',2);")
+
+	t.SetIncludeGtids(uuid + ":3-4," + uuid + ":6-7")
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=2;",
+	)
+
+}
+
 func (t *testParserSuite) TestJson(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
@@ -879,6 +1022,12 @@ func (t *testParserSuite) initTableSchema(tableName ...string) {
 			b1 TIMESTAMP,
 			b2 TIMESTAMP(3) ,
 			b3 TIMESTAMP(6))`,
+		"test_simple": `CREATE TABLE test_simple (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 varchar(100),
+				c2 int,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`,
 	}
 
 	var tables []string

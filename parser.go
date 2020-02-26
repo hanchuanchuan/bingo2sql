@@ -641,7 +641,9 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	p.startFile = cfg.StartFile
 	p.stopFile = cfg.StopFile
 
-	p.parseGtidSets()
+	if err := p.parseGtidSets(); err != nil {
+		return nil, err
+	}
 
 	if len(cfg.SocketUser) > 0 {
 		var fileName []string
@@ -733,40 +735,57 @@ func (p *MyBinlogParser) ProcessChan(wg *sync.WaitGroup) {
 }
 
 // parseGtidSets 解析gtid集合
-func (p *MyBinlogParser) parseGtidSets() {
-	if len(p.cfg.IncludeGtids) > 0 {
+func (p *MyBinlogParser) parseGtidSets() error {
+	if len(p.cfg.IncludeGtids) == 0 {
+		return nil
+	}
 
-		sets := strings.Split(p.cfg.IncludeGtids, ",")
+	sets := strings.Split(p.cfg.IncludeGtids, ",")
 
-		for _, s := range sets {
-			g := &GtidSetInfo{}
-			str := strings.Split(s, ":")
-
-			// 把uuid逆向为16位[]byte
-			u2, err := uuid.FromString(str[0])
-			p.checkError(err)
-
-			g.uuid = u2.Bytes()
-
-			nos := strings.Split(str[1], "-")
-			if len(nos) == 1 {
-				n, _ := strconv.ParseInt(nos[0], 10, 64)
-				g.startSeqNo = n
-				g.stopSeqNo = n
-			} else {
-				n, _ := strconv.ParseInt(nos[0], 10, 64)
-				n2, _ := strconv.ParseInt(nos[1], 10, 64)
-				g.startSeqNo = n
-				g.stopSeqNo = n2
-			}
-
-			p.jumpGtids[g] = false
-			p.includeGtids = append(p.includeGtids, g)
-			fmt.Println(*g)
+	for _, s := range sets {
+		g := &GtidSetInfo{}
+		str := strings.Split(s, ":")
+		if len(str) != 2 {
+			return errors.New("错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
 		}
 
-		log.Debugf("gtid集合数量: %d", len(p.includeGtids))
+		// 把uuid逆向为16位[]byte
+		u2, err := uuid.FromString(str[0])
+		if err != nil {
+			return fmt.Errorf("GTID解析失败!(%s)", err.Error())
+		}
+
+		g.uuid = u2.Bytes()
+
+		nos := strings.Split(str[1], "-")
+		if len(nos) == 1 {
+			n, err := strconv.ParseInt(nos[0], 10, 64)
+			if err != nil {
+				return fmt.Errorf("GTID解析失败!(%s)", err.Error())
+			}
+			g.startSeqNo = n
+			g.stopSeqNo = n
+		} else {
+			n, err := strconv.ParseInt(nos[0], 10, 64)
+			if err != nil {
+				return fmt.Errorf("GTID解析失败!(%s)", err.Error())
+			}
+			n2, err := strconv.ParseInt(nos[1], 10, 64)
+			if err != nil {
+				return fmt.Errorf("GTID解析失败!(%s)", err.Error())
+			}
+			g.startSeqNo = n
+			g.stopSeqNo = n2
+		}
+
+		p.jumpGtids[g] = false
+		p.includeGtids = append(p.includeGtids, g)
+		// fmt.Println(*g)
 	}
+
+	log.Debugf("gtid集合数量: %d", len(p.includeGtids))
+
+	return nil
 }
 
 func (p *baseParser) getDB() (*gorm.DB, error) {
@@ -2109,16 +2128,16 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 			return false, err
 		}
 	case *replication.QueryEvent:
-		// 回滚或者仅dml语句时 跳过
-		if p.cfg.Flashback || !p.cfg.ParseDDL {
-			return
-		}
-
 		if p.cfg.ThreadID > 0 {
 			p.currentThreadID = event.SlaveProxyID
 			if p.cfg.ThreadID != p.currentThreadID {
 				return
 			}
+		}
+
+		// 回滚或者仅dml语句时 跳过
+		if p.cfg.Flashback || !p.cfg.ParseDDL {
+			return
 		}
 
 		if string(event.Query) != "BEGIN" && string(event.Query) != "COMMIT" {
