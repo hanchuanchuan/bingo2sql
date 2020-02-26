@@ -25,22 +25,22 @@ var (
 )
 
 var (
-	runServer  = flagBoolean("server", "s", false, "以服务方式运行")
-	configFile = flag.StringP("config", "c", "config.ini", "bingo2sql config file")
+	runServer  = flagBoolean("server", "s", false, "启动API服务")
+	configFile = flag.StringP("config", "c", "config.ini", "以服务方式启动时可指定配置文件")
 
-	host     = flag.StringP("host", "h", "", "host")
-	port     = flag.IntP("port", "P", 3306, "host")
-	user     = flag.StringP("user", "u", "", "user")
-	password = flag.StringP("password", "p", "", "password")
+	host     = flag.StringP("host", "h", "", "数据库地址")
+	port     = flag.IntP("port", "P", 3306, "端口号")
+	user     = flag.StringP("user", "u", "", "用户名")
+	password = flag.StringP("password", "p", "", "密码")
 
-	startFile = flag.String("start-file", "", "start-file")
-	stopFile  = flag.String("stop-file", "", "stop-file")
+	startFile = flag.String("start-file", "", "起始binlog文件")
+	stopFile  = flag.String("stop-file", "", "结束binlog文件")
 
-	startPosition = flag.Int("start-pos", 0, "start-pos")
-	stopPosition  = flag.Int("stop-pos", 0, "stop-pos")
+	startPosition = flag.Int("start-pos", 0, "起始位置")
+	stopPosition  = flag.Int("stop-pos", 0, "结束位置")
 
-	startTime = flag.String("start-time", "", "start-time")
-	stopTime  = flag.String("stop-time", "", "stop-time")
+	startTime = flag.String("start-time", "", "开始时间")
+	stopTime  = flag.String("stop-time", "", "结束时间")
 
 	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
 	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
@@ -55,19 +55,19 @@ var (
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
 
-	output = flag.StringP("output", "o", "", "output file")
+	output = flag.StringP("output", "o", "", "输出到指定文件")
 
 	gtid = flag.StringP("gtid", "g", "", "GTID范围.格式为uuid:编号[-编号],多个时以逗号分隔")
 
-	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
+	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选.")
 
-	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选. 默认False")
-
-	minimalUpdate = flagBoolean("minimal-update", "M", false, "最小化update语句. 可选. 默认False")
+	minimalUpdate = flagBoolean("minimal-update", "M", false, "最小化update语句. 可选.")
 
 	// extendInsert = flagBoolean("extended-insert", "e", false, "使用包含多个VALUES列表的多行语法编写INSERT语句. 默认False")
 
 	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
+
+	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志")
 )
 
 func main() {
@@ -271,10 +271,10 @@ func parseBinlog(c echo.Context) error {
 	fmt.Println(cfg)
 	fmt.Printf("%#v\n", cfg)
 
-	if cfg.InsID == 0 {
-		r := map[string]string{"error": "请指定数据库地址"}
-		return c.JSON(http.StatusOK, r)
-	}
+	// if cfg.InsID == 0 {
+	// 	r := map[string]string{"error": "请指定数据库地址"}
+	// 	return c.JSON(http.StatusOK, r)
+	// }
 
 	p, err := parser.NewBinlogParser(cfg)
 	if err != nil {

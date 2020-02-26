@@ -93,7 +93,7 @@ type GtidSetInfo struct {
 type BinlogParserConfig struct {
 	Flavor string
 
-	InsID    int    `json:"ins_id" form:"ins_id"`
+	// InsID    int    `json:"ins_id" form:"ins_id"`
 	Host     string `json:"host" form:"host"`
 	Port     uint16 `json:"port" form:"port"`
 	User     string `json:"user" form:"user"`
