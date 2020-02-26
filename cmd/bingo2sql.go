@@ -57,6 +57,8 @@ var (
 
 	output = flag.StringP("output", "o", "", "output file")
 
+	gtid = flag.StringP("gtid", "g", "", "GTID范围.格式为uuid:编号[-编号][,...]")
+
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
 
 	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选. 默认False")
@@ -124,7 +126,8 @@ func runParse() {
 
 		Flashback: *flashback,
 
-		ParseDDL: *parseDDL,
+		ParseDDL:     *parseDDL,
+		IncludeGtids: *gtid,
 
 		Databases: *databases,
 		Tables:    *tables,
