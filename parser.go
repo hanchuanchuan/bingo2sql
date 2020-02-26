@@ -149,6 +149,9 @@ type BinlogParserConfig struct {
 	StopNever bool
 	// 最小化Update语句, 当开启时,update语句中未变更的值不再记录到解析结果中
 	MinimalUpdate bool
+
+	// // 使用包含多个VALUES列表的多行语法编写INSERT语句
+	// ExtendInsert bool
 }
 
 type Parser interface {

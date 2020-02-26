@@ -55,13 +55,15 @@ var (
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
 
-	output = flag.String("output", "", "output file")
+	output = flag.StringP("output", "o", "", "output file")
 
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志.sets log level to debug")
 
 	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选. 默认False")
 
 	minimalUpdate = flagBoolean("minimal-update", "M", false, "最小化update语句. 可选. 默认False")
+
+	// extendInsert = flagBoolean("extended-insert", "e", false, "使用包含多个VALUES列表的多行语法编写INSERT语句. 默认False")
 
 	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
 )
@@ -92,17 +94,11 @@ func main() {
 	if *runServer {
 		startServer()
 	} else {
-
 		if *debug {
 			log.SetLevel(log.DebugLevel)
 		} else {
 			log.SetLevel(log.ErrorLevel)
 		}
-
-		// output := zerolog.ConsoleWriter{
-		// 	Out:        os.Stdout,
-		// 	TimeFormat: "2006-01-02 15:04:05"}
-		// log.Logger = zerolog.New(output).With().Timestamp().Logger()
 
 		// 以独立工具运行
 		runParse()
@@ -139,6 +135,7 @@ func runParse() {
 
 		RemovePrimary: *removePrimary,
 		MinimalUpdate: *minimalUpdate,
+		// ExtendInsert:  *extendInsert,
 
 		StopNever: *stopNever,
 	}
