@@ -75,6 +75,11 @@ var (
 
 	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
 
+	showGTID    = flagBoolean("show-gtid", "", true, "显示gtid")
+	showTime    = flagBoolean("show-time", "", true, "显示执行时间,同一时间仅显示首次")
+	showAllTime = flagBoolean("show-all-time", "", true, "显示每条SQL的执行时间")
+	showThread  = flagBoolean("show-thread", "", true, "显示线程号,便于区别同一进程操作")
+
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志")
 )
 
@@ -147,6 +152,11 @@ func runParse() {
 		RemovePrimary: *removePrimary,
 		MinimalUpdate: *minimalUpdate,
 		// ExtendInsert:  *extendInsert,
+
+		ShowGTID:    *showGTID,
+		ShowTime:    *showTime,
+		ShowAllTime: *showAllTime,
+		ShowThread:  *showThread,
 
 		StopNever: *stopNever,
 	}
@@ -325,7 +335,7 @@ func getAllParse(c echo.Context) error {
 		count++
 		if p, ok := v.(*parser.MyBinlogParser); ok {
 			data := &ParseInfo{
-				ID:        p.Config().Id(),
+				ID:        p.Config().ID(),
 				ParseRows: p.ParseRows(),
 				Percent:   p.Percent(),
 			}
@@ -379,7 +389,7 @@ func parseBinlog(c echo.Context) error {
 			return c.JSON(http.StatusOK, out)
 		}
 	} else {
-		id := cfg.Id()
+		id := cfg.ID()
 		// parserProcess[id] = p
 		parserProcess.Store(id, p)
 		go func() {

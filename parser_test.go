@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -44,15 +43,12 @@ func TestBinLogSyncer(t *testing.T) {
 }
 
 type testParserSuite struct {
-	// b *BinlogSyncer
 	c *client.Conn
-
-	wg sync.WaitGroup
 
 	flavor string
 
-	config      bingo2sql.BinlogParserConfig
-	localConfig bingo2sql.BinlogParserConfig
+	config      bingo2sql.BinlogParserConfig // 远程解析
+	localConfig bingo2sql.BinlogParserConfig // 本地解析
 }
 
 func (t *testParserSuite) SetUpSuite(c *C) {

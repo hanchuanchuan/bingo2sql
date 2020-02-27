@@ -14,7 +14,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -152,6 +151,12 @@ type BinlogParserConfig struct {
 
 	// // 使用包含多个VALUES列表的多行语法编写INSERT语句
 	// ExtendInsert bool
+
+	// 输出设置
+	ShowGTID    bool // 输出GTID
+	ShowTime    bool // 输出执行时间(相同时间时仅返回首次)
+	ShowAllTime bool // 输出所有执行时间
+	ShowThread  bool // 输出线程号,方便判断同一执行人的操作
 }
 
 type Parser interface {
@@ -163,6 +168,9 @@ type row struct {
 	e    *replication.BinlogEvent
 	gtid []byte
 	opid string
+
+	// 用以打印线程号,不打印时置空
+	threadID uint32
 }
 
 type baseParser struct {
@@ -248,7 +256,8 @@ func init() {
 	TimeLocation, _ = time.LoadLocation("Asia/Shanghai")
 }
 
-func (cfg *BinlogParserConfig) Id() string {
+// ID 解析任务的唯一标识
+func (cfg *BinlogParserConfig) ID() string {
 
 	s1 := strings.Replace(cfg.Host, ".", "_", -1)
 	if len(s1) > 20 {
@@ -569,32 +578,97 @@ func (p *MyBinlogParser) Stop() {
 }
 
 func (p *MyBinlogParser) write(b []byte, binEvent *replication.BinlogEvent) {
-	p.ch <- &row{sql: b, e: binEvent, gtid: p.gtid}
+	data := &row{
+		sql: b,
+		e:   binEvent,
+	}
+
+	if p.Config().ShowThread {
+		data.threadID = p.currentThreadID
+	}
+	if p.Config().ShowGTID {
+		data.gtid = p.gtid
+	}
+	p.ch <- data
 }
 
-func (p *MyBinlogParser) myWrite(b []byte, binEvent *replication.BinlogEvent, gtid []byte) {
+// byteEquals 判断字节切片是否相等
+func byteEquals(v1, v2 []byte) bool {
+	if len(v1) != len(v2) {
+		return false
+	}
+	for i, v := range v1 {
+		if v != v2[i] {
+			return false
+		}
+	}
+	return true
+}
 
-	if len(p.lastGtid) == 0 {
-		p.lastGtid = gtid
+// func (p *MyBinlogParser) myWrite(b []byte, binEvent *replication.BinlogEvent, gtid []byte) {
+func (p *MyBinlogParser) myWrite(data *row) {
 
-		p.write2(append([]byte("# "), append(gtid, "\n"...)...))
+	var buf bytes.Buffer
 
-	} else if !reflect.DeepEqual(gtid, p.lastGtid) {
-		p.lastGtid = gtid
-		p.write2(append([]byte("\n# "), append(gtid, "\n"...)...))
+	// 输出GTID
+	if p.Config().ShowGTID && len(data.gtid) > 0 {
+		if len(p.lastGtid) == 0 {
+			p.lastGtid = data.gtid
+			buf.WriteString("# ")
+			buf.Write(data.gtid)
+			// p.write2(append([]byte("# "), append(data.gtid, "\n"...)...))
+
+		} else if !byteEquals(data.gtid, p.lastGtid) {
+			p.lastGtid = data.gtid
+			buf.WriteString("\n# ")
+			buf.Write(data.gtid)
+			// p.write2(append([]byte("\n# "), append(data.gtid, "\n"...)...))
+		}
+
+		// if p.Config().ShowThread{
+		// 	buf.WriteString(" #")
+		// 	buf.WriteString(strconv.Itoa(int(data.threadID)))
+		// }
+		buf.WriteString("\n")
 	}
 
-	if p.lastTimestamp != binEvent.Header.Timestamp {
-		timeinfo := fmt.Sprintf("; # %s\n",
-			time.Unix(int64(binEvent.Header.Timestamp), 0).Format(TimeFormat))
-		b = append(b, timeinfo...)
+	buf.Write(data.sql)
+	if p.Config().ShowAllTime {
+		timeinfo := fmt.Sprintf("; # %s",
+			time.Unix(int64(data.e.Header.Timestamp), 0).Format(TimeFormat))
+		buf.WriteString(timeinfo)
+		if p.Config().ShowThread {
+			buf.WriteString(" # thread_id=")
+			buf.WriteString(strconv.Itoa(int(data.threadID)))
+		}
+		buf.WriteString("\n")
+	} else if p.Config().ShowTime {
+		if p.lastTimestamp != data.e.Header.Timestamp {
+			timeinfo := fmt.Sprintf("; # %s",
+				time.Unix(int64(data.e.Header.Timestamp), 0).Format(TimeFormat))
+			buf.WriteString(timeinfo)
+			p.lastTimestamp = data.e.Header.Timestamp
+		} else {
+			buf.WriteString(";")
+		}
 
-		p.lastTimestamp = binEvent.Header.Timestamp
+		if p.Config().ShowThread {
+			buf.WriteString(" # thread_id=")
+			buf.WriteString(strconv.Itoa(int(data.threadID)))
+		}
+		buf.WriteString("\n")
+
 	} else {
-		b = append(b, ";\n"...)
+		if p.Config().ShowThread {
+			buf.WriteString(" # thread_id=")
+			buf.WriteString(strconv.Itoa(int(data.threadID)))
+		} else {
+			buf.WriteString(";")
+		}
+		buf.WriteString("\n")
 	}
 
-	p.write2(b)
+	p.write2(buf.Bytes())
 }
 
 func (p *MyBinlogParser) write2(b []byte) {
@@ -632,7 +706,7 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	}
 
 	if len(cfg.SocketUser) > 0 {
-		p.outputFileName = fmt.Sprintf("files/%s.sql", p.cfg.Id())
+		p.outputFileName = fmt.Sprintf("files/%s.sql", p.cfg.ID())
 
 		// p.outputFileName = fmt.Sprintf("files/%s_%s.sql", time.Now().Format("20060102_1504"), p.cfg.Id())
 
@@ -719,7 +793,8 @@ func (p *MyBinlogParser) ProcessChan(wg *sync.WaitGroup) {
 			wg.Done()
 			break
 		}
-		p.myWrite(r.sql, r.e, r.gtid)
+		// p.myWrite(r.sql, r.e, r.gtid)
+		p.myWrite(r)
 	}
 }
 
@@ -1917,7 +1992,7 @@ func compareValue(v1 interface{}, v2 interface{}) bool {
 	equal := false
 	switch v := v1.(type) {
 	case []byte:
-		equal = reflect.DeepEqual(v1, v2)
+		equal = byteEquals(v, v2.([]byte))
 	case decimal.Decimal:
 		if newDec, ok := v2.(decimal.Decimal); ok {
 			equal = v.Equal(newDec)
@@ -2035,7 +2110,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 			return false, err
 		}
 	case *replication.QueryEvent:
-		if p.cfg.ThreadID > 0 {
+		if p.cfg.ThreadID > 0 || p.cfg.ShowThread {
 			p.currentThreadID = event.SlaveProxyID
 			if p.cfg.ThreadID != p.currentThreadID {
 				return
