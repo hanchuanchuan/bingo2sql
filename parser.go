@@ -616,20 +616,15 @@ func (p *MyBinlogParser) myWrite(data *row) {
 			p.lastGtid = data.gtid
 			buf.WriteString("# ")
 			buf.Write(data.gtid)
-			// p.write2(append([]byte("# "), append(data.gtid, "\n"...)...))
+			buf.WriteString("\n")
 
 		} else if !byteEquals(data.gtid, p.lastGtid) {
 			p.lastGtid = data.gtid
 			buf.WriteString("\n# ")
 			buf.Write(data.gtid)
-			// p.write2(append([]byte("\n# "), append(data.gtid, "\n"...)...))
+			buf.WriteString("\n")
 		}
 
-		// if p.Config().ShowThread{
-		// 	buf.WriteString(" #")
-		// 	buf.WriteString(strconv.Itoa(int(data.threadID)))
-		// }
-		buf.WriteString("\n")
 	}
 
 	buf.Write(data.sql)

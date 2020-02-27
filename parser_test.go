@@ -183,21 +183,8 @@ func (t *testParserSuite) setupTest(c *C, flavor string) {
 	_, err = t.c.Execute("USE test")
 	c.Assert(err, IsNil)
 
-	// if t.b != nil {
-	// 	t.b.Close()
-	// }
-
-	// cfg := BinlogSyncerConfig{
-	// 	ServerID:   100,
-	// 	Flavor:     flavor,
-	// 	Host:       *testHost,
-	// 	Port:       port,
-	// 	User:       "root",
-	// 	Password:   "",
-	// 	UseDecimal: true,
-	// }
-
-	// t.b = NewBinlogSyncer(cfg)
+	_, err = t.c.Execute("set binlog_format = 'row'")
+	c.Assert(err, IsNil)
 }
 
 func (t *testParserSuite) getThreadID(c *C) uint32 {
@@ -206,7 +193,7 @@ func (t *testParserSuite) getThreadID(c *C) uint32 {
 
 	threadID, err := result.GetInt(0, 0)
 	c.Assert(err, IsNil)
-	log.Errorf("%#v", threadID)
+	// log.Errorf("%#v", threadID)
 	return uint32(threadID)
 }
 
@@ -216,7 +203,7 @@ func (t *testParserSuite) getServerUUID(c *C) string {
 
 	uuid, err := result.GetString(0, 1)
 	c.Assert(err, IsNil)
-	log.Errorf("%#v", uuid)
+	// log.Errorf("%#v", uuid)
 	return uuid
 }
 
@@ -431,7 +418,7 @@ func (t *testParserSuite) TestSync(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
 	t.testExecute(c, `RESET MASTER;`,
-		"SET SESSION binlog_format = 'MIXED'",
+		// "SET SESSION binlog_format = 'MIXED'",
 		`DROP TABLE IF EXISTS test_replication`,
 		`CREATE TABLE test_replication (
 			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
@@ -455,7 +442,7 @@ func (t *testParserSuite) TestSync(c *C) {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8`)
 
 	//use row format
-	t.testExecute(c, "SET SESSION binlog_format = 'ROW'",
+	t.testExecute(c,
 		`INSERT INTO test_replication (str, f, i, e, b, y, da, ts, dt, tm, de, t, bb, se)
 		VALUES ("3", -3.14, 10, "e1", 0b0011, 1985,
 		"2012-05-07", "2012-05-07 14:01:01", "2012-05-07 14:01:01",
@@ -478,7 +465,6 @@ func (t *testParserSuite) TestParseDDL(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
 	t.testExecute(c, `RESET MASTER;`,
-		"SET SESSION binlog_format = 'MIXED'",
 		`DROP TABLE IF EXISTS test_replication`,
 		`CREATE TABLE test_replication (
 			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
@@ -502,7 +488,7 @@ func (t *testParserSuite) TestParseDDL(c *C) {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8`)
 
 	//use row format
-	t.testExecute(c, "SET SESSION binlog_format = 'ROW'",
+	t.testExecute(c,
 		`INSERT INTO test_replication (str, f, i, e, b, y, da, ts, dt, tm, de, t, bb, se)
 		VALUES ("3", -3.14, 10, "e1", 0b0011, 1985,
 		"2012-05-07", "2012-05-07 14:01:01", "2012-05-07 14:01:01",
