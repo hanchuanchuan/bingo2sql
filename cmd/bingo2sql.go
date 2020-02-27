@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	parser "github.com/hanchuanchuan/bingo2sql"
@@ -16,7 +17,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-var parserProcess map[string]*parser.MyBinlogParser
+// var parserProcess map[string]*parser.MyBinlogParser
+var parserProcess sync.Map
 
 type ParseInfo struct {
 	ID        string `json:"id"`
@@ -91,7 +93,7 @@ func main() {
 		return
 	}
 
-	parserProcess = make(map[string]*parser.MyBinlogParser)
+	// parserProcess = make(map[string]*parser.MyBinlogParser)
 
 	if *configFile == "" {
 		flag.Usage()
@@ -287,33 +289,56 @@ func getParseInfo(c echo.Context) error {
 		})
 	}
 
-	if p, ok := parserProcess[id]; ok {
-		data := &ParseInfo{
-			ID:        id,
-			ParseRows: p.ParseRows(),
-			Percent:   p.Percent(),
+	if v, ok := parserProcess.Load(id); ok {
+		if p, ok := v.(*parser.MyBinlogParser); ok {
+			data := &ParseInfo{
+				ID:        id,
+				ParseRows: p.ParseRows(),
+				Percent:   p.Percent(),
+			}
+			return c.JSON(http.StatusOK, data)
 		}
-		return c.JSON(http.StatusOK, data)
-	} else {
-		return c.JSON(http.StatusNotFound, "Not Found!")
 	}
+
+	return c.JSON(http.StatusNotFound, "Not Found!")
 }
 
 // getAllParse 获取所有进程信息
 func getAllParse(c echo.Context) error {
 
-	log.Print("当前解析进程数量: ", len(parserProcess))
+	// log.Print("当前解析进程数量: ", len(parserProcess.Range()))
 
-	response := make([]*ParseInfo, 0, len(parserProcess))
-	for _, p := range parserProcess {
-		data := &ParseInfo{
-			ID:        p.Config().Id(),
-			ParseRows: p.ParseRows(),
-			Percent:   p.Percent(),
+	//
+	// for _, p := range parserProcess {
+	// 	data := &ParseInfo{
+	// 		ID:        p.Config().Id(),
+	// 		ParseRows: p.ParseRows(),
+	// 		Percent:   p.Percent(),
+	// 	}
+	// 	response = append(response, data)
+	// }
+	// return c.JSON(http.StatusOK, response)
+
+	count := 0
+	// response := make([]*ParseInfo, 0, len(parserProcess))
+	response := make([]*ParseInfo, 0)
+	// 遍历所有sync.Map中的键值对
+	parserProcess.Range(func(k, v interface{}) bool {
+		count++
+		if p, ok := v.(*parser.MyBinlogParser); ok {
+			data := &ParseInfo{
+				ID:        p.Config().Id(),
+				ParseRows: p.ParseRows(),
+				Percent:   p.Percent(),
+			}
+			response = append(response, data)
 		}
-		response = append(response, data)
-	}
+		fmt.Println("iterate:", k, v)
+		return true
+	})
+	log.Print("当前解析进程数量: ", count)
 	return c.JSON(http.StatusOK, response)
+
 }
 
 func parseBinlog(c echo.Context) error {
@@ -357,9 +382,11 @@ func parseBinlog(c echo.Context) error {
 		}
 	} else {
 		id := cfg.Id()
-		parserProcess[id] = p
+		// parserProcess[id] = p
+		parserProcess.Store(id, p)
 		go func() {
-			defer delete(parserProcess, id)
+			// defer delete(parserProcess, id)
+			defer parserProcess.Delete(id)
 			p.Parser()
 		}()
 
@@ -379,19 +406,32 @@ func parseBinlogStop(c echo.Context) error {
 
 	response := make(map[string]string)
 
-	log.Print("当前解析进程数量: ", len(parserProcess))
+	// log.Print("当前解析进程数量: ", len(parserProcess))
 
-	defer delete(parserProcess, id)
+	// defer delete(parserProcess, id)
+	defer parserProcess.Delete(id)
 
-	if p, ok := parserProcess[id]; ok {
-		p.Stop()
+	if v, ok := parserProcess.Load(id); ok {
+		if p, ok := v.(*parser.MyBinlogParser); ok {
+			p.Stop()
 
-		response["ok"] = "1"
-		return c.JSON(http.StatusOK, response)
-	} else {
-		response["ok"] = "2"
-		return c.JSON(http.StatusOK, response)
+			response["ok"] = "1"
+			return c.JSON(http.StatusOK, response)
+		}
 	}
+
+	response["ok"] = "2"
+	return c.JSON(http.StatusOK, response)
+
+	// if p, ok := parserProcess[id]; ok {
+	// 	p.Stop()
+
+	// 	response["ok"] = "1"
+	// 	return c.JSON(http.StatusOK, response)
+	// } else {
+	// 	response["ok"] = "2"
+	// 	return c.JSON(http.StatusOK, response)
+	// }
 }
 
 func download(c echo.Context) error {
