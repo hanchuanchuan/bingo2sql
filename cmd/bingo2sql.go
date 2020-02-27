@@ -259,8 +259,6 @@ func startServer() {
 	// 下载解析生成的文件
 	group.GET("/parse/download/:id", download)
 
-	// router.POST("/go/mysql/binlog/parse_work/:work_id/:db_id", parseBinlogWork)
-
 	// router.Logger.Fatal(router.Start(addr))
 	router.Logger.Fatal(router.Start(":8077"))
 }

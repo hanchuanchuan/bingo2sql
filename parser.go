@@ -406,35 +406,17 @@ func (p *MyBinlogParser) Parser() error {
 
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
 
-			var url string
-			if strings.Count(p.outputFileName, ".") > 0 {
-				a := strings.Split(p.outputFileName, ".")
-				url = strings.Join(a[0:len(a)-1], ".")
-			} else {
-				url = p.outputFileName
-			}
-
-			url = url + ".tar.gz"
-
-			// err := archiver.TarGz.Make(url, []string{p.outputFileName})
-			// err := archiver.TarGz.Archiver(
-			//     []string{p.outputFileName},
-			//     url)
-			err := archiver.Archive([]string{p.outputFileName}, url)
+			// 打包,以便下载
+			fileSize, err := p.Archive()
 			if err != nil {
 				return err
 			}
 
-			fileInfo, _ := os.Stat(url)
-			//文件大小
-			filesize := fileInfo.Size()
-
-			// 压缩完成后删除文件
-			p.clear()
-
-			log.Info("压缩完成")
-			kwargs = map[string]interface{}{"ok": "1", "pct": 100, "rows": p.changeRows,
-				"url": "/go/download/" + strings.Replace(url, "../", "", -1), "size": filesize}
+			kwargs = map[string]interface{}{
+				"ok":   "1",
+				"pct":  100,
+				"rows": p.changeRows,
+				"size": fileSize}
 			go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度",
 				"", kwargs)
 		} else {
@@ -1778,93 +1760,6 @@ func escapeStringQuotes(buf []byte, v string) []byte {
 	return buf[:pos]
 }
 
-// func ProcessWork(work_id string, db_id int, socket_user string) error {
-
-//     dbConfig := &DBConfig{}
-
-//     ini_cfg, err := ini.Load("../cnf/config.ini")
-//     if err != nil {
-//         log.Error().Err(err)
-//         return err
-//     }
-
-//     err = ini_cfg.Section("DBConfig").MapTo(dbConfig)
-//     if err != nil {
-//         log.Error().Err(err)
-//         return err
-//     }
-
-//     db, err := dbConfig.GetDB()
-//     if err != nil {
-//         log.Error().Err(err)
-//         return err
-//     }
-
-//     backupDBConfig := &DBConfig{}
-//     err = ini_cfg.Section("BackupDBConfig").MapTo(backupDBConfig)
-//     if err != nil {
-//         log.Error().Err(err)
-//         return err
-//     }
-
-//     backupdb, err := backupDBConfig.GetDB()
-//     if err != nil {
-//         log.Error().Err(err)
-//         return err
-//     }
-
-//     log.Info("解析开始")
-
-//     cfg := new(BinlogParserConfig)
-
-//     // 配置工单记录的读取链表
-//     r := &incRecords{
-//         work_id: work_id,
-//         db_id:   db_id,
-
-//         localdb:  db,
-//         backupdb: backupdb,
-//     }
-
-//     backupInfos := NewIterator(r)
-
-//     // 从第一条inception备份日志中获取远端服务器信息
-//     first := backupInfos.First()
-//     if first == nil {
-//         log.Info("未找到备份信息,操作结束")
-//         return errors.New("未找到备份信息,操作结束")
-//     }
-
-//     // 当实例的端口和数据库端口不一致时,表明是中间件数据库,此时替换为实际IP和PORT
-//     host, port := backupInfos.getDBAddress(work_id, db_id)
-//     if int(first.Port) != port {
-//         cfg.Host = host
-//         cfg.Port = uint16(port)
-//     } else {
-//         cfg.Host = first.Host
-//         cfg.Port = first.Port
-//     }
-
-//     // cfg.SetRemoteDBUser(db)
-
-//     cfg.StartFile = first.StartFile
-//     cfg.StartPosition = first.StartPosition
-
-//     cfg.SocketUser = socket_user
-
-//     // 初始化解析类
-//     p, _ := NewBinlogParser2(cfg)
-
-//     p.localdb = db
-//     p.backupdb = backupdb
-//     p.backupInfos = backupInfos
-
-//     go p.Parser2()
-
-//     return nil
-
-// }
-
 // GetDataTypeBase 获取dataType中的数据类型，忽略长度
 func GetDataTypeBase(dataType string) string {
 	if i := strings.Index(dataType, "("); i > 0 {
@@ -1874,16 +1769,15 @@ func GetDataTypeBase(dataType string) string {
 	return dataType
 }
 
+// readTableSchema 读取表结构
 func (p *MyBinlogParser) readTableSchema(path string) error {
 	fileObj, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-
 	defer fileObj.Close()
-	//一个文件对象本身是实现了io.Reader的 使用bufio.NewReader去初始化一个Reader对象，存在buffer中的，读取一次就会被清空
-	reader := bufio.NewReader(fileObj)
 
+	reader := bufio.NewReader(fileObj)
 	p.tableCacheList = make(map[string]*Table)
 
 	var buf []string
@@ -1932,6 +1826,7 @@ func (p *MyBinlogParser) readTableSchema(path string) error {
 	return nil
 }
 
+// cacheNewTable 缓存表结构
 func (p *MyBinlogParser) cacheNewTable(t *Table) {
 
 	var key string
@@ -1947,6 +1842,7 @@ func (p *MyBinlogParser) cacheNewTable(t *Table) {
 	p.tableCacheList[key] = t
 }
 
+// buildTableInfo 构建表结构
 func buildTableInfo(node *ast.CreateTableStmt) *Table {
 	table := &Table{
 		Schema:    node.Table.Schema.String(),
@@ -1987,6 +1883,7 @@ func buildTableInfo(node *ast.CreateTableStmt) *Table {
 	return table
 }
 
+// buildNewColumnToCache 构建列
 func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
 	c := &Column{}
 
@@ -2266,4 +2163,32 @@ func (p *MyBinlogParser) Percent() int {
 	}
 
 	return 0
+}
+
+// Archive文件压缩打包
+func (p *MyBinlogParser) Archive() (fileSize int64, err error) {
+	var url string
+	if strings.Count(p.outputFileName, ".") > 0 {
+		a := strings.Split(p.outputFileName, ".")
+		url = strings.Join(a[0:len(a)-1], ".")
+	} else {
+		url = p.outputFileName
+	}
+
+	url = url + ".tar.gz"
+
+	err = archiver.Archive([]string{p.outputFileName}, url)
+	if err != nil {
+		return 0, err
+	}
+
+	fileInfo, _ := os.Stat(url)
+	//文件大小
+	fileSize = fileInfo.Size()
+
+	// 压缩完成后删除文件
+	p.clear()
+
+	log.Info("打包完成")
+	return fileSize, nil
 }
