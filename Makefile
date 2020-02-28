@@ -195,8 +195,8 @@ endif
 release:
 	@echo "$(CGREEN)Cross platform building for release ...$(CEND)"
 	@mkdir -p release
-	# @for GOOS in darwin linux; do
-	@for GOOS in linux; do \
+	# @for GOOS in linux; do
+	@for GOOS in windows darwin linux; do \
 		echo "Building $${GOOS}-$${GOARCH} ..."; \
 		GOOS=$${GOOS} GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)'  -o bin/$(PROJECT) cmd/bingo2sql.go; \
 		cd bin; \
