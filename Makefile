@@ -199,8 +199,10 @@ release:
 	@for GOOS in linux; do \
 		echo "Building $${GOOS}-$${GOARCH} ..."; \
 		GOOS=$${GOOS} GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)'  -o bin/$(PROJECT) cmd/bingo2sql.go; \
-		tar -czf bin/$(PROJECT)-$${GOOS}-${VERSION}.tar.gz bin/$(PROJECT); \
-		rm -f bin/$(PROJECT); \
+		cd bin; \
+		tar -czf $(PROJECT)-$${GOOS}-${VERSION}.tar.gz $(PROJECT); \
+		rm -f $(PROJECT); \
+		cd ..; \
 	done
 
 docker:
