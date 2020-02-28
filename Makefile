@@ -197,12 +197,10 @@ release:
 	@mkdir -p release
 	# @for GOOS in darwin linux; do
 	@for GOOS in linux; do \
-		for GOARCH in amd64; do \
-			echo "Building $${GOOS}-$${GOARCH} ..."; \
-			GOOS=$${GOOS} GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)'  -o bin/$(PROJECT) cmd/bingo2sql.go; \
-			tar -czf bin/$(PROJECT)-$${GOOS}-amd64-${VERSION}.tar.gz bin/$(PROJECT); \
-			rm -f bin/$(PROJECT); \
-		done ;\
+		echo "Building $${GOOS}-$${GOARCH} ..."; \
+		GOOS=$${GOOS} GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)'  -o bin/$(PROJECT) cmd/bingo2sql.go; \
+		tar -czf bin/$(PROJECT)-$${GOOS}-${VERSION}.tar.gz bin/$(PROJECT); \
+		rm -f bin/$(PROJECT); \
 	done
 
 docker:
