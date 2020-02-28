@@ -77,8 +77,8 @@ var (
 
 	showGTID    = flagBoolean("show-gtid", "", true, "显示gtid")
 	showTime    = flagBoolean("show-time", "", true, "显示执行时间,同一时间仅显示首次")
-	showAllTime = flagBoolean("show-all-time", "", true, "显示每条SQL的执行时间")
-	showThread  = flagBoolean("show-thread", "", true, "显示线程号,便于区别同一进程操作")
+	showAllTime = flagBoolean("show-all-time", "", false, "显示每条SQL的执行时间")
+	showThread  = flagBoolean("show-thread", "", false, "显示线程号,便于区别同一进程操作")
 
 	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志")
 )
@@ -350,7 +350,11 @@ func getAllParse(c echo.Context) error {
 }
 
 func parseBinlog(c echo.Context) error {
-	cfg := new(parser.BinlogParserConfig)
+
+	cfg := &parser.BinlogParserConfig{
+		ShowGTID: true,
+		ShowTime: true,
+	}
 
 	if err := c.Bind(cfg); err != nil {
 		return err
