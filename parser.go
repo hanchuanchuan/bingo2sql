@@ -148,9 +148,8 @@ type BinlogParserConfig struct {
 	StopNever bool
 	// 最小化Update语句, 当开启时,update语句中未变更的值不再记录到解析结果中
 	MinimalUpdate bool
-
-	// // 使用包含多个VALUES列表的多行语法编写INSERT语句
-	// ExtendInsert bool
+	// 使用包含多个VALUES列表的多行语法编写INSERT语句
+	MinimalInsert bool
 
 	// 输出设置
 	ShowGTID    bool // 输出GTID
@@ -1082,6 +1081,7 @@ func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
 
 func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
+
 	var buf []byte
 	if len(t.Columns) < int(e.ColumnCount) {
 		return "", fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
@@ -1091,6 +1091,10 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 	var columnNames []string
 	c := "`%s`"
 	template := "INSERT INTO `%s`.`%s`(%s) VALUES(%s)"
+	if p.cfg.MinimalInsert && len(e.Rows) > 1 {
+		template = "INSERT INTO `%s`.`%s`(%s) VALUES%s"
+	}
+
 	for i, col := range t.Columns {
 		if i < int(e.ColumnCount) {
 			//  有主键且设置去除主键时 作特殊处理
@@ -1107,12 +1111,16 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 	paramValues := strings.Repeat("?,", len(columnNames))
 	paramValues = strings.TrimRight(paramValues, ",")
 
+	if p.cfg.MinimalInsert && len(e.Rows) > 1 {
+		paramValues = strings.Repeat("("+paramValues+"),", len(e.Rows))
+	}
+
 	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
 		strings.Join(columnNames, ","), paramValues)
 
+	var vv []driver.Value
 	for _, rows := range e.Rows {
 
-		var vv []driver.Value
 		for i, d := range rows {
 			if t.hasPrimary && p.cfg.RemovePrimary {
 				if _, ok := t.primarys[i]; ok {
@@ -1126,11 +1134,21 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 			vv = append(vv, d)
 		}
 
+		if !p.cfg.MinimalInsert || len(e.Rows) == 1 {
+			r, err := InterpolateParams(sql, vv)
+			if err != nil {
+				log.Error(err)
+			}
+			p.write(r, binEvent)
+			vv = nil
+		}
+	}
+
+	if p.cfg.MinimalInsert && len(e.Rows) > 1 {
 		r, err := InterpolateParams(sql, vv)
 		if err != nil {
 			log.Error(err)
 		}
-
 		p.write(r, binEvent)
 	}
 

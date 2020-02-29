@@ -69,9 +69,9 @@ var (
 
 	removePrimary = flagBoolean("no-primary-key", "K", false, "对INSERT语句去除主键. 可选.")
 
-	minimalUpdate = flagBoolean("minimal-update", "M", false, "最小化update语句. 可选.")
+	minimalUpdate = flagBoolean("minimal-update", "M", true, "最小化update语句. 可选.")
 
-	// extendInsert = flagBoolean("extended-insert", "e", false, "使用包含多个VALUES列表的多行语法编写INSERT语句. 默认False")
+	minimalInsert = flagBoolean("minimal-insert", "I", true, "使用包含多个VALUES列表的多行语法编写INSERT语句.")
 
 	stopNever = flagBoolean("stop-never", "N", false, "持续解析binlog")
 
@@ -151,7 +151,7 @@ func runParse() {
 
 		RemovePrimary: *removePrimary,
 		MinimalUpdate: *minimalUpdate,
-		// ExtendInsert:  *extendInsert,
+		MinimalInsert: *minimalInsert,
 
 		ShowGTID:    *showGTID,
 		ShowTime:    *showTime,
@@ -354,6 +354,9 @@ func parseBinlog(c echo.Context) error {
 	cfg := &parser.BinlogParserConfig{
 		ShowGTID: true,
 		ShowTime: true,
+
+		MinimalInsert: true,
+		MinimalUpdate: true,
 	}
 
 	if err := c.Bind(cfg); err != nil {
