@@ -12,6 +12,7 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/pkg/profile"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -80,10 +81,16 @@ var (
 	showAllTime = flagBoolean("show-all-time", "", false, "显示每条SQL的执行时间")
 	showThread  = flagBoolean("show-thread", "", false, "显示线程号,便于区别同一进程操作")
 
-	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志")
+	debug        = flagBoolean("debug", "", false, "调试模式,输出详细日志")
+	debugProfile = flagBoolean("debug-profile", "", false, "profile调试")
 )
 
 func main() {
+
+	// defer profile.Start(profile.MemProfile).Stop()
+	if *debugProfile {
+		defer profile.Start(profile.ProfilePath("/tmp")).Stop()
+	}
 
 	flag.SortFlags = false
 

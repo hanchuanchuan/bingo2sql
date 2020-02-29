@@ -2072,7 +2072,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 
 		finishFlag = p.checkFinish(&p.currentPosition)
 		if finishFlag == 1 {
-			log.Error("is finish")
+			log.Warn("is finish")
 			return false, nil
 		}
 	}

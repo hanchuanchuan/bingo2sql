@@ -25,6 +25,7 @@ require (
 	github.com/pierrec/lz4 v2.4.1+incompatible // indirect
 	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pkg/profile v1.4.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24
 	github.com/sirupsen/logrus v1.4.2
