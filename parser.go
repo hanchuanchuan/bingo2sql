@@ -1,9 +1,5 @@
-// go-mysqlbinlog: a simple binlog tool to sync remote MySQL binlog.
-// go-mysqlbinlog supports semi-sync mode like facebook mysqlbinlog.
-// see http://yoshinorimatsunobu.blogspot.com/2014/04/semi-synchronous-replication-at-facebook.html
 package bingo2sql
 
-// time go run mainRemote.go -start-time="2018-09-17 00:00:00" -stop-time="2018-09-25 00:00:00" -o=1.sql
 import (
 	"bufio"
 	"bytes"
@@ -36,6 +32,7 @@ import (
 const digits01 = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
 const digits10 = "0000000000111111111122222222223333333333444444444455555555556666666666777777777788888888889999999999"
 
+// Column 列结构
 type Column struct {
 	gorm.Model
 	ColumnName       string `gorm:"Column:COLUMN_NAME"`
@@ -55,8 +52,9 @@ func (f *Column) IsUnsigned() bool {
 	return false
 }
 
+// Table 表结构
 type Table struct {
-	tableId uint64
+	tableID uint64
 
 	// 仅本地解析使用
 	TableName string
@@ -67,6 +65,7 @@ type Table struct {
 	primarys   map[int]bool
 }
 
+// MasterStatus 主库binlog信息（相对bingo2sql的主库，可以是只读库）
 type MasterStatus struct {
 	gorm.Model
 	File              string `gorm:"Column:File"`
@@ -76,19 +75,21 @@ type MasterStatus struct {
 	Executed_Gtid_Set string `gorm:"Column:Executed_Gtid_Set"`
 }
 
+// MasterLog 主库binlog日志
 type MasterLog struct {
 	gorm.Model
 	Name string `gorm:"Column:Log_name"`
 	Size int    `gorm:"Column:File_size"`
 }
 
-// GTID集合,可指定或排除GTID范围
+// GtidSetInfo GTID集合,可指定或排除GTID范围
 type GtidSetInfo struct {
 	uuid       []byte
 	startSeqNo int64
 	stopSeqNo  int64
 }
 
+// BinlogParserConfig 解析选项
 type BinlogParserConfig struct {
 	Flavor string
 
@@ -162,6 +163,7 @@ type Parser interface {
 	write([]byte, *replication.BinlogEvent)
 }
 
+// row 协程解析binlog事件的通道
 type row struct {
 	sql  []byte
 	e    *replication.BinlogEvent
@@ -205,6 +207,7 @@ type baseParser struct {
 	localMode bool
 }
 
+// MyBinlogParser 解析类
 type MyBinlogParser struct {
 	baseParser
 
@@ -276,6 +279,7 @@ func (cfg *BinlogParserConfig) ID() string {
 		s2)
 }
 
+// Parser 远程解析
 func (p *MyBinlogParser) Parser() error {
 
 	if p.cfg.Host == "" && p.cfg.StartFile != "" {
@@ -442,7 +446,7 @@ func (p *MyBinlogParser) Parser() error {
 	return nil
 }
 
-// isFinish 检查是否需要结束循环
+// checkFinish 检查是否需要结束循环
 func (p *MyBinlogParser) checkFinish(currentPosition *mysql.Position) int {
 	returnValue := -1
 	// 满足以下任一条件时结束循环
@@ -496,31 +500,13 @@ func (p *MyBinlogParser) checkFinish(currentPosition *mysql.Position) int {
 	return returnValue
 }
 
+// clear 压缩完成或者没有数据时删除文件
 func (p *MyBinlogParser) clear() {
-	// 压缩完成或者没有数据时删除文件
 	err := os.Remove(p.outputFileName)
 	if err != nil {
 		log.Error(err)
 		log.Errorf("删除文件失败! %s", p.outputFileName)
 	}
-}
-
-func StringSliceEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	if (a == nil) != (b == nil) {
-		return false
-	}
-
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-
-	return true
 }
 
 func (p *MyBinlogParser) isGtidEventInGtidSet() (status uint8) {
@@ -1079,7 +1065,8 @@ func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
 	return true
 }
 
-func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
+// generateInsertSQL 生成insert语句
+func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
 
 	var buf []byte
@@ -1113,6 +1100,7 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 
 	if p.cfg.MinimalInsert && len(e.Rows) > 1 {
 		paramValues = strings.Repeat("("+paramValues+"),", len(e.Rows))
+		paramValues = strings.TrimRight(paramValues, ",")
 	}
 
 	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
@@ -1155,7 +1143,8 @@ func (p *MyBinlogParser) generateInsertSql(t *Table, e *replication.RowsEvent,
 	return string(buf), nil
 }
 
-func (p *MyBinlogParser) generateDeleteSql(t *Table, e *replication.RowsEvent,
+// generateDeleteSQL 生成delete语句
+func (p *MyBinlogParser) generateDeleteSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
 	var buf []byte
 	if len(t.Columns) < int(e.ColumnCount) {
@@ -1265,7 +1254,9 @@ func abs(n int64) int64 {
 	y := n >> 63
 	return (n ^ y) - y
 }
-func (p *MyBinlogParser) generateUpdateSql(t *Table, e *replication.RowsEvent,
+
+// generateUpdateSQL 生成update语句
+func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) (string, error) {
 	var buf []byte
 	if len(t.Columns) < int(e.ColumnCount) {
@@ -1500,7 +1491,7 @@ func (p *MyBinlogParser) tableInformation(tableId uint64, schema []byte, tableNa
 	}
 
 	newTable := new(Table)
-	newTable.tableId = tableId
+	newTable.tableID = tableId
 	newTable.Columns = allRecord
 
 	// if !p.cfg.AllColumns {
@@ -1560,6 +1551,7 @@ func (p *MyBinlogParser) autoParseBinlogPosition() []MasterLog {
 	return binlogIndex
 }
 
+// InterpolateParams 填充占位符参数
 func InterpolateParams(query string, args []driver.Value) ([]byte, error) {
 	// Number of ? should be same to len(args)
 	if strings.Count(query, "?") != len(args) {
@@ -2164,24 +2156,24 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 		case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
 			if _, ok := p.SqlTypes["insert"]; ok {
 				if p.cfg.Flashback {
-					_, err = p.generateDeleteSql(table, event, e)
+					_, err = p.generateDeleteSQL(table, event, e)
 				} else {
-					_, err = p.generateInsertSql(table, event, e)
+					_, err = p.generateInsertSQL(table, event, e)
 				}
 				p.changeRows = p.changeRows + len(event.Rows)
 			}
 		case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
 			if _, ok := p.SqlTypes["delete"]; ok {
 				if p.cfg.Flashback {
-					_, err = p.generateInsertSql(table, event, e)
+					_, err = p.generateInsertSQL(table, event, e)
 				} else {
-					_, err = p.generateDeleteSql(table, event, e)
+					_, err = p.generateDeleteSQL(table, event, e)
 				}
 				p.changeRows = p.changeRows + len(event.Rows)
 			}
 		case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
 			if _, ok := p.SqlTypes["update"]; ok {
-				_, err = p.generateUpdateSql(table, event, e)
+				_, err = p.generateUpdateSQL(table, event, e)
 				p.changeRows = p.changeRows + len(event.Rows)/2
 			}
 		}

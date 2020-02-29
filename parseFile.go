@@ -1,9 +1,5 @@
-// go-mysqlbinlog: a simple binlog tool to sync remote MySQL binlog.
-// go-mysqlbinlog supports semi-sync mode like facebook mysqlbinlog.
-// see http://yoshinorimatsunobu.blogspot.com/2014/04/semi-synchronous-replication-at-facebook.html
 package bingo2sql
 
-// time go run mainRemote.go -start-time="2018-09-17 00:00:00" -stop-time="2018-09-25 00:00:00" -o=1.sql
 import (
 	"bufio"
 	"os"

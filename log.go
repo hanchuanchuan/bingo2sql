@@ -10,10 +10,15 @@ import (
 )
 
 var (
-	BuildTS    = ""
-	GitHash    = ""
-	GitBranch  = ""
-	GoVersion  = ""
+	// BuildTS 打包时间
+	BuildTS = ""
+	// GitHash GIT提交ID
+	GitHash = ""
+	// GitBranch GIT分支
+	GitBranch = ""
+	// GoVersion GOLANG版本
+	GoVersion = ""
+	// GitVersion GIT版本
 	GitVersion = ""
 )
 
@@ -67,7 +72,7 @@ func isSkippedPackageName(name string) bool {
 		strings.Contains(name, "github.com/coreos/pkg/capnslog")
 }
 
-// PrintInfo prints the  version information.
+// PrintVersion prints the  version information.
 func PrintVersion() {
 	log.Infof("Version: %s", GitVersion)
 	log.Infof("Git Commit Hash: %s", GitHash)
