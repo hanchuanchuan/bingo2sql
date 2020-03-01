@@ -81,13 +81,15 @@ var (
 	showAllTime = flagBoolean("show-all-time", "", false, "显示每条SQL的执行时间")
 	showThread  = flagBoolean("show-thread", "", false, "显示线程号,便于区别同一进程操作")
 
-	debug        = flagBoolean("debug", "", false, "调试模式,输出详细日志")
-	debugProfile = flagBoolean("debug-profile", "", false, "profile调试")
+	debug      = flagBoolean("debug", "", false, "调试模式,输出详细日志")
+	cpuProfile = flagBoolean("cpu-profile", "", false, "调试模式,开启CPU性能跟踪")
 )
 
 func main() {
 
 	flag.SortFlags = false
+	// 隐藏CPU性能跟踪调试参数
+	flag.MarkHidden("cpu-profile")
 
 	if err := flag.Parse(os.Args[1:]); err != nil {
 		log.Error(err)
@@ -101,19 +103,19 @@ func main() {
 	}
 
 	// defer profile.Start(profile.MemProfile).Stop()
-	if *debugProfile {
-		defer profile.Start(profile.ProfilePath("/tmp")).Stop()
+	if *cpuProfile {
+		defer profile.Start(profile.ProfilePath(".")).Stop()
 	}
 
 	// parserProcess = make(map[string]*parser.MyBinlogParser)
 
-	if *configFile == "" {
-		flag.Usage()
-		return
-	}
-
 	// 以服务方式运行
 	if *runServer {
+		if *configFile == "" {
+			flag.Usage()
+			return
+		}
+
 		startServer()
 	} else {
 		if *debug {
