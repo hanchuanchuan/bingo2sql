@@ -1068,17 +1068,17 @@ func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
 // generateInsertSQL 生成insert语句
 func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
-
+	tableName := getTableName(e)
 	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
-			e.Table.Schema, e.Table.Table, len(t.Columns), e.ColumnCount)
+		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+			tableName, len(t.Columns), e.ColumnCount)
 	}
 
 	var columnNames []string
 	c := "`%s`"
-	template := "INSERT INTO `%s`.`%s`(%s) VALUES(%s)"
+	template := "INSERT INTO %s(%s) VALUES(%s)"
 	if p.cfg.MinimalInsert && len(e.Rows) > 1 {
-		template = "INSERT INTO `%s`.`%s`(%s) VALUES%s"
+		template = "INSERT INTO %s(%s) VALUES%s"
 	}
 
 	for i, col := range t.Columns {
@@ -1102,8 +1102,7 @@ func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 		paramValues = strings.TrimRight(paramValues, ",")
 	}
 
-	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
-		strings.Join(columnNames, ","), paramValues)
+	sql := fmt.Sprintf(template, tableName, strings.Join(columnNames, ","), paramValues)
 
 	var vv []driver.Value
 	for _, rows := range e.Rows {
@@ -1145,14 +1144,15 @@ func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 // generateDeleteSQL 生成delete语句
 func (p *MyBinlogParser) generateDeleteSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
+	tableName := getTableName(e)
 	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
-			e.Table.Schema, e.Table.Table, len(t.Columns), e.ColumnCount)
+		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+			tableName, len(t.Columns), e.ColumnCount)
 	}
 
-	template := "DELETE FROM `%s`.`%s` WHERE"
+	template := "DELETE FROM %s WHERE"
 
-	sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table)
+	sql := fmt.Sprintf(template, tableName)
 
 	c_null := " `%s` IS ?"
 	c := " `%s`=?"
@@ -1256,12 +1256,13 @@ func abs(n int64) int64 {
 // generateUpdateSQL 生成update语句
 func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
+	tableName := getTableName(e)
 	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s.%s缺少列!当前列数:%d,binlog的列数%d",
-			e.Table.Schema, e.Table.Table, len(t.Columns), e.ColumnCount)
+		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+			tableName, len(t.Columns), e.ColumnCount)
 	}
 
-	template := "UPDATE `%s`.`%s` SET%s WHERE"
+	template := "UPDATE %s SET%s WHERE"
 
 	setValue := " `%s`=?"
 
@@ -1287,11 +1288,10 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 				sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
 			}
 		}
-		sql = fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
-			strings.Join(sets, ","))
+		sql = fmt.Sprintf(template, tableName, strings.Join(sets, ","))
 	}
 
-	// sql := fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
+	// sql := fmt.Sprintf(template,tableName,
 	// 	strings.Join(sets, ","))
 
 	var (
@@ -1304,48 +1304,12 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 
 		if i%2 == 0 {
 			// 旧值
-			if !p.cfg.Flashback {
-				columnNames = nil
-			}
+			columnNames = nil
 
 			for j, d := range rows {
-				if p.cfg.Flashback {
-					if minimalMode {
-						// 最小化模式下,列如果相等则省略
-						if !compareValue(d, e.Rows[i+1][j]) {
-							if t.Columns[j].IsUnsigned() {
-								d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
-							}
-							newValues = append(newValues, d)
-							if j < len(t.Columns) {
-								sets = append(sets, fmt.Sprintf(setValue, t.Columns[j].ColumnName))
-							}
-						}
-					} else {
-						if t.Columns[j].IsUnsigned() {
-							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
-						}
-						newValues = append(newValues, d)
-					}
-
-				} else {
-					if t.hasPrimary {
-						_, ok := t.primarys[j]
-						if ok {
-							oldValues = append(oldValues, d)
-
-							if d == nil {
-								columnNames = append(columnNames,
-									fmt.Sprintf(c_null, t.Columns[j].ColumnName))
-							} else {
-								columnNames = append(columnNames,
-									fmt.Sprintf(c, t.Columns[j].ColumnName))
-							}
-						}
-					} else {
-						if t.Columns[j].IsUnsigned() {
-							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
-						}
+				if t.hasPrimary {
+					_, ok := t.primarys[j]
+					if ok {
 						oldValues = append(oldValues, d)
 
 						if d == nil {
@@ -1355,71 +1319,47 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 							columnNames = append(columnNames,
 								fmt.Sprintf(c, t.Columns[j].ColumnName))
 						}
+					}
+				} else {
+					if t.Columns[j].IsUnsigned() {
+						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+					}
+					oldValues = append(oldValues, d)
+
+					if d == nil {
+						columnNames = append(columnNames,
+							fmt.Sprintf(c_null, t.Columns[j].ColumnName))
+					} else {
+						columnNames = append(columnNames,
+							fmt.Sprintf(c, t.Columns[j].ColumnName))
 					}
 				}
 			}
 		} else {
 			// 新值
-			if p.cfg.Flashback {
-				columnNames = nil
-			}
 			for j, d := range rows {
-				if p.cfg.Flashback {
-
-					if t.hasPrimary {
-						_, ok := t.primarys[j]
-						if ok {
-							if t.Columns[j].IsUnsigned() {
-								d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
-							}
-							oldValues = append(oldValues, d)
-
-							if d == nil {
-								columnNames = append(columnNames,
-									fmt.Sprintf(c_null, t.Columns[j].ColumnName))
-							} else {
-								columnNames = append(columnNames,
-									fmt.Sprintf(c, t.Columns[j].ColumnName))
-							}
-						}
-					} else {
-						if t.Columns[j].IsUnsigned() {
-							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
-						}
-						oldValues = append(oldValues, d)
-
-						if d == nil {
-							columnNames = append(columnNames,
-								fmt.Sprintf(c_null, t.Columns[j].ColumnName))
-						} else {
-							columnNames = append(columnNames,
-								fmt.Sprintf(c, t.Columns[j].ColumnName))
-						}
-					}
-				} else {
-					if minimalMode {
-						// 最小化模式下,列如果相等则省略
-						if !compareValue(d, e.Rows[i-1][j]) {
-							if t.Columns[j].IsUnsigned() {
-								d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
-							}
-							newValues = append(newValues, d)
-							if j < len(t.Columns) {
-								sets = append(sets, fmt.Sprintf(setValue, t.Columns[j].ColumnName))
-							}
-						}
-					} else {
+				if minimalMode {
+					// 最小化模式下,列如果相等则省略
+					if !compareValue(d, e.Rows[i-1][j]) {
 						if t.Columns[j].IsUnsigned() {
 							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
 						}
 						newValues = append(newValues, d)
+						if j < len(t.Columns) {
+							sets = append(sets, fmt.Sprintf(setValue, t.Columns[j].ColumnName))
+						}
 					}
+				} else {
+					if t.Columns[j].IsUnsigned() {
+						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+					}
+					newValues = append(newValues, d)
 				}
 			}
 
 			newValues = append(newValues, oldValues...)
 			if minimalMode {
-				sql = fmt.Sprintf(template, e.Table.Schema, e.Table.Table,
+				sql = fmt.Sprintf(template, tableName,
 					strings.Join(sets, ","))
 				sets = nil
 			}
@@ -1439,6 +1379,123 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 	return nil
 }
 
+// generateUpdateRollbackSQL 生成update语句
+func (p *MyBinlogParser) generateUpdateRollbackSQL(t *Table, e *replication.RowsEvent,
+	binEvent *replication.BinlogEvent) error {
+	tableName := getTableName(e)
+	if len(t.Columns) < int(e.ColumnCount) {
+		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+			tableName, len(t.Columns), e.ColumnCount)
+	}
+
+	template := "UPDATE %s SET%s WHERE"
+
+	setValue := " `%s`=?"
+
+	var columnNames []string
+	c_null := " `%s` IS ?"
+	c := " `%s`=?"
+
+	var sql string
+	var sets []string
+
+	// 最小化回滚语句, 当开启时,update语句中未变更的值不再记录到回滚语句中
+	minimalMode := p.cfg.MinimalUpdate
+
+	if !minimalMode {
+		for i, col := range t.Columns {
+			if i < int(e.ColumnCount) {
+				sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
+			}
+		}
+		sql = fmt.Sprintf(template, tableName, strings.Join(sets, ","))
+	}
+
+	var (
+		oldValues []driver.Value
+		newValues []driver.Value
+		newSql    string
+	)
+	// update时, Rows为2的倍数, 双数index为旧值,单数index为新值
+	for i, rows := range e.Rows {
+
+		if i%2 == 0 {
+			// 旧值
+			for j, d := range rows {
+				if minimalMode {
+					// 最小化模式下,列如果相等则省略
+					if !compareValue(d, e.Rows[i+1][j]) {
+						if t.Columns[j].IsUnsigned() {
+							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+						}
+						newValues = append(newValues, d)
+						if j < len(t.Columns) {
+							sets = append(sets, fmt.Sprintf(setValue, t.Columns[j].ColumnName))
+						}
+					}
+				} else {
+					if t.Columns[j].IsUnsigned() {
+						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+					}
+					newValues = append(newValues, d)
+				}
+			}
+		} else {
+			// 新值
+			if p.cfg.Flashback {
+				columnNames = nil
+			}
+			for j, d := range rows {
+				if t.hasPrimary {
+					_, ok := t.primarys[j]
+					if ok {
+						if t.Columns[j].IsUnsigned() {
+							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+						}
+						oldValues = append(oldValues, d)
+
+						if d == nil {
+							columnNames = append(columnNames,
+								fmt.Sprintf(c_null, t.Columns[j].ColumnName))
+						} else {
+							columnNames = append(columnNames,
+								fmt.Sprintf(c, t.Columns[j].ColumnName))
+						}
+					}
+				} else {
+					if t.Columns[j].IsUnsigned() {
+						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
+					}
+					oldValues = append(oldValues, d)
+
+					if d == nil {
+						columnNames = append(columnNames,
+							fmt.Sprintf(c_null, t.Columns[j].ColumnName))
+					} else {
+						columnNames = append(columnNames,
+							fmt.Sprintf(c, t.Columns[j].ColumnName))
+					}
+				}
+			}
+
+			newValues = append(newValues, oldValues...)
+			if minimalMode {
+				sql = fmt.Sprintf(template, tableName, strings.Join(sets, ","))
+				sets = nil
+			}
+			newSql = strings.Join([]string{sql, strings.Join(columnNames, " AND")}, "")
+			r, err := InterpolateParams(newSql, newValues)
+			p.checkError(err)
+
+			p.write(r, binEvent)
+
+			oldValues = nil
+			newValues = nil
+		}
+	}
+
+	return nil
+}
 func (p *MyBinlogParser) tableInformation(tableId uint64, schema []byte, tableName []byte) (*Table, error) {
 
 	table, ok := p.allTables[tableId]
@@ -2170,7 +2227,11 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 			}
 		case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
 			if _, ok := p.SqlTypes["update"]; ok {
-				err = p.generateUpdateSQL(table, event, e)
+				if p.cfg.Flashback {
+					err = p.generateUpdateRollbackSQL(table, event, e)
+				} else {
+					err = p.generateUpdateSQL(table, event, e)
+				}
 				p.changeRows = p.changeRows + len(event.Rows)/2
 			}
 		}
@@ -2268,4 +2329,15 @@ func (p *MyBinlogParser) Archive() (fileSize int64, err error) {
 
 	log.Info("打包完成")
 	return fileSize, nil
+}
+
+// getTableName 获取RowsEvent的表名
+func getTableName(e *replication.RowsEvent) string {
+	var build strings.Builder
+	build.WriteString("`")
+	build.Write(e.Table.Schema)
+	build.WriteString("`.`")
+	build.Write(e.Table.Table)
+	build.WriteString("`")
+	return build.String()
 }

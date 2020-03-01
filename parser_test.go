@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -354,12 +355,14 @@ func (t *testParserSuite) checkBinlog(c *C, sqls ...string) {
 func (t *testParserSuite) getBinlog(c *C) []string {
 	// 在线方式解析
 	resultOnline := t.getBinlogWithConfig(c, &t.config)
-	// 本地解析
-	resultLocal := t.getBinlogWithConfig(c, &t.localConfig)
+	if runtime.GOOS == "linux" {
+		// 本地解析
+		resultLocal := t.getBinlogWithConfig(c, &t.localConfig)
 
-	c.Assert(len(resultOnline), Equals, len(resultLocal), Commentf("%#v", resultOnline))
-	for i, line := range resultOnline {
-		c.Assert(line, Equals, resultLocal[i], Commentf("%#v", resultOnline))
+		c.Assert(len(resultOnline), Equals, len(resultLocal), Commentf("%#v", resultOnline))
+		for i, line := range resultOnline {
+			c.Assert(line, Equals, resultLocal[i], Commentf("%#v", resultOnline))
+		}
 	}
 
 	return resultOnline
