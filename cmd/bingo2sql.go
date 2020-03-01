@@ -87,11 +87,6 @@ var (
 
 func main() {
 
-	// defer profile.Start(profile.MemProfile).Stop()
-	if *debugProfile {
-		defer profile.Start(profile.ProfilePath("/tmp")).Stop()
-	}
-
 	flag.SortFlags = false
 
 	if err := flag.Parse(os.Args[1:]); err != nil {
@@ -103,6 +98,11 @@ func main() {
 		fmt.Fprint(os.Stderr, "Usage of bingo2sql:\n")
 		flag.PrintDefaults()
 		return
+	}
+
+	// defer profile.Start(profile.MemProfile).Stop()
+	if *debugProfile {
+		defer profile.Start(profile.ProfilePath("/tmp")).Stop()
 	}
 
 	// parserProcess = make(map[string]*parser.MyBinlogParser)
