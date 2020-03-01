@@ -1,4 +1,4 @@
-# bingo2sql  
+# bingo2sql
 MySQL Binlog 解析工具
 
 从MySQL binlog解析出原始SQL，对应的回滚SQL等。
@@ -14,6 +14,11 @@ MySQL Binlog 解析工具
 - MySQL必须开启binlog
 - binlog_format = row
 - binlog_row_image = full
+
+#### 测试对比
+
+测试步骤及结束详见 [效率测试](docs/test.md)
+
 
 ### 支持模式
 
