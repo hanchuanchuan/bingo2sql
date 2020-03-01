@@ -47,13 +47,15 @@ bingo2sql --server --config=config.ini
 
 **解析模式**
 
-- --stop-never 持续解析binlog。可选。默认False，同步至执行命令时最新的binlog位置。
+- --stop-never 持续解析binlog。可选。默认false，同步至执行命令时最新的binlog位置。
 
-- -K, --no-primary-key 对INSERT语句去除主键。可选。默认False
+- -K, --no-primary-key 对INSERT语句去除主键。可选。默认false
 
-- -B, --flashback 生成回滚SQL，可解析大文件，不受内存限制。可选。默认False。与stop-never或no-primary-key不能同时添加。
+- -B, --flashback 生成回滚SQL，可解析大文件，不受内存限制。可选。默认false。与stop-never或no-primary-key不能同时添加。
 
-- -M, --minimal-update 最小化update语句. 可选. (default false)
+- -M, --minimal-update 最小化update语句. 可选. (default true)
+
+- -I, --minimal-insert 使用包含多个VALUES列表的多行语法编写INSERT语句. (default true)
 
 **解析范围控制**
 
@@ -81,7 +83,7 @@ bingo2sql --server --config=config.ini
 
 -t, --tables 只解析目标table的sql，多张表用逗号隔开，如-t tbl1,tbl2。可选。默认为空。
 
---ddl 解析ddl，仅支持正向解析。可选。默认False。
+--ddl 解析ddl，仅支持正向解析。可选。默认false。
 
 --sql-type 只解析指定类型，支持 insert,update,delete。多个类型用逗号隔开，如--sql-type=insert,delete。可选。默认为增删改都解析。
 

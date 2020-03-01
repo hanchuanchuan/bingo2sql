@@ -34,9 +34,6 @@ var (
 )
 
 var (
-	runServer  = flagBoolean("server", "s", false, "启动API服务")
-	configFile = flag.StringP("config", "c", "config.ini", "以服务方式启动时可指定配置文件")
-
 	host     = flag.StringP("host", "h", "", "数据库地址")
 	port     = flag.IntP("port", "P", 3306, "端口号")
 	user     = flag.StringP("user", "u", "", "用户名")
@@ -52,7 +49,7 @@ var (
 	stopTime  = flag.String("stop-time", "", "结束时间")
 
 	databases = flag.StringP("databases", "d", "", "数据库列表,多个时以逗号分隔")
-	tables    = flag.StringP("tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
+	tables    = flag.StringP("tables", "t", "", "表名或表结构文件.远程解析时指定表名(可多个,以逗号分隔),本地解析时指定表结构文件")
 
 	threadID = flag.Uint64P("connection-id", "C", 0, "指定线程ID")
 
@@ -60,7 +57,7 @@ var (
 
 	parseDDL = flagBoolean("ddl", "", false, "解析DDL语句(仅正向SQL)")
 
-	sqlType = flag.String("type", "insert,delete,update", "解析的语句类型")
+	sqlType = flag.String("sql-type", "insert,delete,update", "解析的语句类型")
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
 
@@ -80,6 +77,9 @@ var (
 	showTime    = flagBoolean("show-time", "", true, "显示执行时间,同一时间仅显示首次")
 	showAllTime = flagBoolean("show-all-time", "", false, "显示每条SQL的执行时间")
 	showThread  = flagBoolean("show-thread", "", false, "显示线程号,便于区别同一进程操作")
+
+	runServer  = flagBoolean("server", "s", false, "启动API服务")
+	configFile = flag.StringP("config", "c", "config.ini", "以服务方式启动时需指定配置文件")
 
 	debug      = flagBoolean("debug", "", false, "调试模式,输出详细日志")
 	cpuProfile = flagBoolean("cpu-profile", "", false, "调试模式,开启CPU性能跟踪")
