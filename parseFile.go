@@ -19,6 +19,12 @@ func (p *MyBinlogParser) parserFile() error {
 
 	defer timeTrack(time.Now(), "parserFile")
 
+	defer func() {
+		if p.outputFile != nil {
+			p.outputFile.Close()
+		}
+	}()
+
 	var err error
 
 	p.running = true
@@ -120,8 +126,6 @@ func (p *MyBinlogParser) parserFile() error {
 	wg.Wait()
 
 	if len(p.cfg.SocketUser) > 0 {
-		p.outputFile.Close()
-
 		if p.changeRows > 0 {
 			kwargs := map[string]interface{}{"rows": p.changeRows}
 			kwargs["pct"] = 99

@@ -28,7 +28,7 @@ var (
 	// 解析binlog生成的SQL文件
 	binlogOutputFile string = "binlog_output.sql"
 	// 本地方式解析binlog生成的SQL文件
-	localOutputFile string = "binlog_output.sql"
+	localOutputFile string = "binlog_output_local.sql"
 
 	// 表结构文件. 用于本地解析
 	tableSchemaFile string = "table_schema.sql"
@@ -83,9 +83,12 @@ func (t *testParserSuite) SetUpSuite(c *C) {
 }
 
 func (t *testParserSuite) TearDownSuite(c *C) {
-	os.Remove(binlogOutputFile)
-	os.Remove(localOutputFile)
-	os.Remove(tableSchemaFile)
+	err := os.Remove(binlogOutputFile)
+	c.Assert(err, IsNil)
+	err = os.Remove(localOutputFile)
+	c.Assert(err, IsNil)
+	err = os.Remove(tableSchemaFile)
+	c.Assert(err, IsNil)
 }
 
 func (t *testParserSuite) SetUpTest(c *C) {
