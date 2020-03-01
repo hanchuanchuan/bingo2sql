@@ -1,17 +1,17 @@
 # bingo2sql
 MySQL Binlog 解析工具
 
-从MySQL binlog解析出原始SQL,对应的回滚SQL等.
+从MySQL binlog解析出原始SQL，对应的回滚SQL等。
 
-### 限制和要求
+#### 限制和要求
 
 - MySQL必须开启binlog
 - binlog_format = row
 - binlog_row_image = full
 
-## 支持模式
+### 支持模式
 
-### 1. 本地解析
+#### 1. 本地解析
 ```sh
 bingo2sql --start-file=~/db_cmdb/blog/mysql-bin.000001 -t table.sql
 ```
@@ -25,7 +25,7 @@ CREATE TABLE `tt` (
 ```
 
 
-### 2. 远程解析
+#### 2. 远程解析
 
 远程解析的参数及使用均与binlog2sql类似
 
@@ -34,7 +34,7 @@ bingo2sql -h=127.0.0.1 -P 3306 -u test -p test -d db1_3306_test_inc \
   --start-time="2006-01-02 15:04:05" -t t1 -B
 ```
 
-### 3. 解析服务
+#### 3. 解析服务
 
 bingo2sql 支持以服务方式运行,提供解析的HTTP接口支持
 
@@ -43,7 +43,7 @@ bingo2sql --server --config=config.ini
 ```
 
 
-## 支持选项
+### 支持选项
 
 **解析模式**
 
@@ -108,3 +108,9 @@ bingo2sql --server --config=config.ini
  -u user
  -p password
 ```
+
+#### 致谢
+    bingo2sql借鉴和学习了很多业界知名的开源项目，在此表示感谢！
+- [go-mysql](https://github.com/siddontang/go-mysql) handle MySQL network protocol and replication
+- [binlog2sql](https://github.com/danfengcao/binlog2sql) Parse MySQL binlog to SQL you want
+- [binlog_rollback](https://github.com/GoDannyLai/binlog_rollback) mysql binlog rollback | flashback | redo | dml report | ddl info
