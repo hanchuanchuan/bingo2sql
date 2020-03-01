@@ -83,12 +83,9 @@ func (t *testParserSuite) SetUpSuite(c *C) {
 }
 
 func (t *testParserSuite) TearDownSuite(c *C) {
-	err := os.Remove(binlogOutputFile)
-	c.Assert(err, IsNil)
-	err = os.Remove(localOutputFile)
-	c.Assert(err, IsNil)
-	err = os.Remove(tableSchemaFile)
-	c.Assert(err, IsNil)
+	os.Remove(binlogOutputFile)
+	os.Remove(localOutputFile)
+	os.Remove(tableSchemaFile)
 }
 
 func (t *testParserSuite) SetUpTest(c *C) {
@@ -772,7 +769,59 @@ func (t *testParserSuite) TestThreadID(c *C) {
 		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
 		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'test',1);",
 	)
+}
 
+// TestInsert 测试insert
+func (t *testParserSuite) TestInsert(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_simple`,
+		`CREATE TABLE test_simple (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 varchar(100),
+				c2 int,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`)
+
+	t.testExecute(c,
+		`INSERT INTO test_simple (c1, c2) VALUES ('a1',1),('a2',2),('a3',3),('a4',4),('a5',5)`,
+		`DELETE FROM test_simple WHERE id > 0`)
+
+	t.config.MinimalInsert = false
+	t.localConfig.MinimalInsert = false
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'a1',1);",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(2,'a2',2);",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(3,'a3',3);",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(4,'a4',4);",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(5,'a5',5);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=2;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=3;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=4;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=5;")
+
+	t.config.MinimalInsert = true
+	t.localConfig.MinimalInsert = true
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'a1',1),(2,'a2',2),(3,'a3',3),(4,'a4',4),(5,'a5',5);",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=2;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=3;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=4;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=5;")
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_simple` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=2;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=3;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=4;",
+		"DELETE FROM `test`.`test_simple` WHERE `id`=5;",
+		"INSERT INTO `test`.`test_simple`(`id`,`c1`,`c2`) VALUES(1,'a1',1),(2,'a2',2),(3,'a3',3),(4,'a4',4),(5,'a5',5);",
+	)
 }
 
 // TestThreadID 测试指定线程号,操作后断开重连
