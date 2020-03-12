@@ -2053,6 +2053,15 @@ func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
 // compareValue 比较两值是否相等
 func compareValue(v1 interface{}, v2 interface{}) bool {
 	equal := false
+
+	// 处理特殊情况
+	if v1 == nil && v2 == nil {
+		return true
+	}
+	if v1 == nil || v2 == nil {
+		return false
+	}
+
 	switch v := v1.(type) {
 	case []byte:
 		equal = byteEquals(v, v2.([]byte))

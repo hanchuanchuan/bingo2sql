@@ -677,23 +677,58 @@ func (t *testParserSuite) TestMinimalUpdate(c *C) {
 	t.testExecute(c, `RESET MASTER;`,
 		fmt.Sprintf(`INSERT INTO test_replication (id, str, f, i, bb, de) VALUES (%d, "4", -3.14, 100, "abc", -45635.64)`, id),
 		fmt.Sprintf(`UPDATE test_replication SET f = -12.14, de = 555.34 WHERE id = %d`, id),
+		fmt.Sprintf(`UPDATE test_replication SET str=null WHERE id = %d`, id),
 		fmt.Sprintf(`DELETE FROM test_replication WHERE id = %d`, id))
 
 	t.SetSQLType("update")
 
 	t.checkBinlog(c,
-		"UPDATE `test`.`test_replication` SET `id`=100, `str`='4', `f`=-12.14, `d`=NULL, `de`=555.34, `i`=100, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`='abc', `se`=NULL WHERE `id`=100;")
+		"UPDATE `test`.`test_replication` SET `id`=100, `str`='4', `f`=-12.14, `d`=NULL, `de`=555.34, `i`=100, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`='abc', `se`=NULL WHERE `id`=100;",
+		"UPDATE `test`.`test_replication` SET `id`=100, `str`=NULL, `f`=-12.14, `d`=NULL, `de`=555.34, `i`=100, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`='abc', `se`=NULL WHERE `id`=100;")
 
 	t.SetFlashback(true)
 	t.SetMinimalUpdate(true)
 	t.checkBinlog(c,
 		"UPDATE `test`.`test_replication` SET `f`=-3.14, `de`=-45635.64 WHERE `id`=100;",
+		"UPDATE `test`.`test_replication` SET `str`='4' WHERE `id`=100;",
 	)
 
 	t.SetFlashback(false)
 	t.checkBinlog(c,
 		"UPDATE `test`.`test_replication` SET `f`=-12.14, `de`=555.34 WHERE `id`=100;",
+		"UPDATE `test`.`test_replication` SET `str`=NULL WHERE `id`=100;",
 	)
+
+}
+
+func (t *testParserSuite) TestUpdate2Null(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	id := 100
+	t.testExecute(c, `RESET MASTER;`,
+		fmt.Sprintf(`INSERT INTO test_replication (id,str, f, i, e, b, y, da, ts, dt, tm, de, t, bb, se)
+		VALUES (%d,"3", -3.14, 10, "e1", 0b0011, 1985,
+		"2012-05-07", "2012-05-07 14:01:01", "2012-05-07 14:01:01",
+		"14:01:01", -45363.64, "abc", "12345", "a,b")`, id),
+		fmt.Sprintf(`UPDATE test_replication SET  str = null,f = null,d = null,de = null,i = null,bi = null,e = null,b = null,y = null,da = null,ts = null,dt = null,tm = null,t = null,bb = null WHERE id = %d`, id),
+		fmt.Sprintf(`DELETE FROM test_replication WHERE id = %d`, id))
+
+	t.SetSQLType("update")
+
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `id`=100, `str`=NULL, `f`=NULL, `d`=NULL, `de`=NULL, `i`=NULL, `bi`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL, `se`=3 WHERE `id`=100;")
+
+	t.SetFlashback(true)
+	t.SetMinimalUpdate(true)
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `str`='3', `f`=-3.14, `de`=-45363.64, `i`=10, `e`=1, `b`=3, `y`=1985, `da`='2012-05-07', `ts`='2012-05-07 14:01:01', `dt`='2012-05-07 14:01:01', `tm`='14:01:01', `t`='abc', `bb`='12345' WHERE `id`=100;",
+	)
+
+	t.SetFlashback(false)
+	t.checkBinlog(c,
+		"UPDATE `test`.`test_replication` SET `str`=NULL, `f`=NULL, `de`=NULL, `i`=NULL, `e`=NULL, `b`=NULL, `y`=NULL, `da`=NULL, `ts`=NULL, `dt`=NULL, `tm`=NULL, `t`=NULL, `bb`=NULL WHERE `id`=100;",
+	)
+
 }
 
 func (t *testParserSuite) TestRemovePrimary(c *C) {
