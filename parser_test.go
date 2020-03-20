@@ -701,6 +701,41 @@ func (t *testParserSuite) TestMinimalUpdate(c *C) {
 
 }
 
+func (t *testParserSuite) TestTextMax(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	id := 100
+
+	// 65536 = 64k
+	value := strings.Repeat("a", 1024*1024*10)
+
+	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_long_text`,
+		`CREATE TABLE test_long_text (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 longtext,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`,
+		fmt.Sprintf(`INSERT INTO test_long_text (id, c1) VALUES (%d, "")`, id),
+		fmt.Sprintf(`UPDATE test_long_text SET c1 = '%s' WHERE id = %d`, value, id),
+		fmt.Sprintf(`DELETE FROM test_long_text WHERE id = %d`, id))
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_long_text`(`id`,`c1`) VALUES(100,'');",
+		fmt.Sprintf("UPDATE `test`.`test_long_text` SET `id`=100, `c1`='%s' WHERE `id`=100;", value),
+		"DELETE FROM `test`.`test_long_text` WHERE `id`=100;",
+	)
+
+	t.SetFlashback(true)
+	t.SetMinimalUpdate(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_long_text` WHERE `id`=100;",
+		"UPDATE `test`.`test_long_text` SET `c1`='' WHERE `id`=100;",
+		fmt.Sprintf("INSERT INTO `test`.`test_long_text`(`id`,`c1`) VALUES(100,'%s');", value),
+	)
+
+}
+
 func (t *testParserSuite) TestUpdate2Null(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
@@ -761,6 +796,7 @@ func (t *testParserSuite) TestThreadID(c *C) {
 	t.setupTest(c, mysql.MySQLFlavor)
 
 	t.testExecute(c, `RESET MASTER;`,
+		`DROP TABLE IF EXISTS test_simple`,
 		`DROP TABLE IF EXISTS test_simple`,
 		`CREATE TABLE test_simple (
 				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
@@ -1098,6 +1134,11 @@ func (t *testParserSuite) initTableSchema(tableName ...string) {
 				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
 				c1 varchar(100),
 				c2 int,
+				PRIMARY KEY (id)
+				) ENGINE=InnoDB`,
+		"test_long_text": `CREATE TABLE test_long_text (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				c1 longtext,
 				PRIMARY KEY (id)
 				) ENGINE=InnoDB`,
 	}

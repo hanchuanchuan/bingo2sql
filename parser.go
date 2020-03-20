@@ -1735,11 +1735,12 @@ func InterpolateParams(query string, args []driver.Value) ([]byte, error) {
 		}
 
 		// 4 << 20 , 4MB
-		if len(buf)+4 > 4<<20 {
-			// log.Print("%T", v)
-			log.Info("解析错误")
-			return nil, errors.New("driver: skip fast-path; continue as if unimplemented")
-		}
+		// 移除对单行大小的判断,不入库不需要该限制
+		// if len(buf)+4 > 4<<20 {
+		// 	// log.Print("%T", v)
+		// 	log.Info("解析错误")
+		// 	return nil, errors.New("driver: skip fast-path; continue as if unimplemented")
+		// }
 	}
 	if argPos != len(args) {
 		// log.Print("%T", v)
