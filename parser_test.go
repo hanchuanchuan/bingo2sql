@@ -136,7 +136,7 @@ func (t *testParserSuite) SetUpSuite(c *C) {
 
 	t.createTables(c)
 
-	log.SetLevel(log.ErrorLevel)
+	log.SetLevel(log.InfoLevel)
 }
 
 func (t *testParserSuite) TearDownSuite(c *C) {
@@ -492,7 +492,7 @@ func (t *testParserSuite) getBinlogWithConfig(c *C, config *bingo2sql.BinlogPars
 func (t *testParserSuite) reset() {
 	t.config = defaultConfig
 	t.localConfig = localConfig
-	log.SetLevel(log.ErrorLevel)
+	// log.SetLevel(log.ErrorLevel)
 }
 
 func (t *testParserSuite) TestSync(c *C) {
