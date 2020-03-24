@@ -10,6 +10,13 @@ jobs:
     branches:
       ignore: gh-pages
 
+    machine:
+      services:
+        - mysql
+
+
+
+
     docker:
       - image: circleci/golang:1.13
       - image: circleci/mysql:5.7
@@ -22,6 +29,16 @@ jobs:
     working_directory: /go/src/github.com/hanchuanchuan/bingo2sql
 
     steps:
+
+      # 关闭数据库,重启并开启binlog,设置字符集
+      - run: ps -ef|grep mysql
+
+      - run: mysql -e 'select version()'
+      - run: mysql -e "show variables like '%buffer_pool%'"
+      - run: mysql -e "create database if not exists test DEFAULT CHARACTER SET utf8;create database if not exists test_inc DEFAULT CHARACTER SET utf8;"
+      - run: mysql -e "grant all on *.* to test@'127.0.0.1' identified by 'test';FLUSH PRIVILEGES;select '初始化成功!';"
+      - run: ps -ef|grep mysql
+
       - run:
           name: Install mysql-client
           command: sudo apt install default-mysql-client
