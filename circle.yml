@@ -16,11 +16,7 @@ jobs:
     docker:
       - image: circleci/golang:1.13
       - image: circleci/mysql:5.7
-        command: |
-        mysqld --lower_case_table_names=1 --character-set-server=utf8mb4 \
-        --collation-server=utf8mb4_bin --innodb-large-prefix=true --log-bin=on \
-        --server_id=111 --explicit_defaults_for_timestamp=true \
-        --gtid-mode=1 --enforce_gtid_consistency=1
+        command: mysqld --lower_case_table_names=1 --character-set-server=utf8mb4  --collation-server=utf8mb4_bin --innodb-large-prefix=true --log-bin=on --server_id=111 --explicit_defaults_for_timestamp=true --gtid-mode=1 --enforce_gtid_consistency=1
         environment:
           - MYSQL_ALLOW_EMPTY_PASSWORD=true
           TZ: "Asia/Shanghai"
