@@ -270,7 +270,14 @@ func (t *testParserSuite) getServerUUID(c *C) string {
 
 	uuid, err := result.GetString(0, 1)
 	c.Assert(err, IsNil)
-	// log.Errorf("%#v", uuid)
+	log.Infof("server uuid: %#v", uuid)
+
+	result, err = t.c.Execute("show master status;")
+	c.Assert(err, IsNil)
+	file, _ := result.GetString(0, 0)
+	gtidSet, _ := result.GetString(0, 4)
+	log.Infof("binlog: %s, gtid set: %s", file, gtidSet)
+
 	return uuid
 }
 
