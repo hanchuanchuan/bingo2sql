@@ -25,12 +25,12 @@ var testHost = flag.String("host", "127.0.0.1", "MySQL master host")
 var testOutputLogs = flag.Bool("out", false, "output binlog event")
 
 var allTables = map[string]string{
-	"test_json_v2": `CREATE TABLE test_json_v2 (
+	"test_json_v2": `CREATE TABLE IF NOT EXISTS test_json_v2 (
 			id INT,
 			c JSON,
 			PRIMARY KEY (id)
 			) ENGINE=InnoDB`,
-	"test_replication": `CREATE TABLE test_replication (
+	"test_replication": `CREATE TABLE IF NOT EXISTS test_replication (
 				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
 				str VARCHAR(256),
 				f FLOAT,
@@ -50,14 +50,14 @@ var allTables = map[string]string{
 				se SET('a', 'b', 'c'),
 				PRIMARY KEY (id)
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8`,
-	"test_json": `CREATE TABLE test_json (
+	"test_json": `CREATE TABLE IF NOT EXISTS test_json (
 			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
 			c1 JSON,
 			c2 DECIMAL(10, 0),
 			PRIMARY KEY (id)
 			) ENGINE=InnoDB`,
-	"test_geo": `CREATE TABLE test_geo (id int auto_increment primary key, g GEOMETRY)`,
-	"test_parse_time": `CREATE TABLE test_parse_time (
+	"test_geo": `CREATE TABLE IF NOT EXISTS test_geo (id int auto_increment primary key, g GEOMETRY)`,
+	"test_parse_time": `CREATE TABLE IF NOT EXISTS test_parse_time (
 		id int auto_increment primary key,
 		a1 DATETIME,
 		a2 DATETIME(3),
@@ -65,13 +65,13 @@ var allTables = map[string]string{
 		b1 TIMESTAMP,
 		b2 TIMESTAMP(3) ,
 		b3 TIMESTAMP(6))`,
-	"test_simple": `CREATE TABLE test_simple (
+	"test_simple": `CREATE TABLE IF NOT EXISTS test_simple (
 			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
 			c1 varchar(100),
 			c2 int,
 			PRIMARY KEY (id)
 			) ENGINE=InnoDB`,
-	"test_long_text": `CREATE TABLE test_long_text (
+	"test_long_text": `CREATE TABLE IF NOT EXISTS test_long_text (
 			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
 			c1 longtext,
 			PRIMARY KEY (id)
