@@ -131,7 +131,7 @@ func (t *testParserSuite) setBinlogDir(c *C) {
 	result, err = t.c.Execute("show master logs")
 	c.Assert(err, IsNil)
 
-	basename, err = result.GetString(0, 1)
+	basename, err = result.GetString(0, 0)
 	c.Assert(err, IsNil)
 	t.config.StartFile = basename
 	defaultConfig.StartFile = basename
