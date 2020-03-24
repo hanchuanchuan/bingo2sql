@@ -103,10 +103,7 @@ clean:
 	$(GO) clean -i ./...
 	rm -rf *.out
 
-test: gotest explaintest
-
-explaintest: server
-	@cd cmd/explaintest && ./run-tests.sh -s ../../bin/$(PROJECT)
+test: gotest
 
 gotest:
 	$(GO) get github.com/etcd-io/gofail@v0.0.0-20180808172546-51ce9a71510a
