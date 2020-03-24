@@ -23,6 +23,61 @@ import (
 var testHost = flag.String("host", "127.0.0.1", "MySQL master host")
 
 var testOutputLogs = flag.Bool("out", false, "output binlog event")
+
+var allTables = map[string]string{
+	"test_json_v2": `CREATE TABLE test_json_v2 (
+			id INT,
+			c JSON,
+			PRIMARY KEY (id)
+			) ENGINE=InnoDB`,
+	"test_replication": `CREATE TABLE test_replication (
+				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+				str VARCHAR(256),
+				f FLOAT,
+				d DOUBLE,
+				de DECIMAL(10,2),
+				i INT,
+				bi BIGINT,
+				e enum ("e1", "e2"),
+				b BIT(8),
+				y YEAR,
+				da DATE,
+				ts TIMESTAMP,
+				dt DATETIME,
+				tm TIME,
+				t TEXT,
+				bb BLOB,
+				se SET('a', 'b', 'c'),
+				PRIMARY KEY (id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8`,
+	"test_json": `CREATE TABLE test_json (
+			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+			c1 JSON,
+			c2 DECIMAL(10, 0),
+			PRIMARY KEY (id)
+			) ENGINE=InnoDB`,
+	"test_geo": `CREATE TABLE test_geo (id int auto_increment primary key, g GEOMETRY)`,
+	"test_parse_time": `CREATE TABLE test_parse_time (
+		id int auto_increment primary key,
+		a1 DATETIME,
+		a2 DATETIME(3),
+		a3 DATETIME(6),
+		b1 TIMESTAMP,
+		b2 TIMESTAMP(3) ,
+		b3 TIMESTAMP(6))`,
+	"test_simple": `CREATE TABLE test_simple (
+			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+			c1 varchar(100),
+			c2 int,
+			PRIMARY KEY (id)
+			) ENGINE=InnoDB`,
+	"test_long_text": `CREATE TABLE test_long_text (
+			id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
+			c1 longtext,
+			PRIMARY KEY (id)
+			) ENGINE=InnoDB`,
+}
+
 var (
 	// 解析binlog生成的SQL文件
 	binlogOutputFile string = "binlog_output.sql"
@@ -78,6 +133,9 @@ func (t *testParserSuite) SetUpSuite(c *C) {
 
 	t.initTableSchema()
 	t.setBinlogDir(c)
+
+	t.createTables(c)
+
 	log.SetLevel(log.ErrorLevel)
 }
 
@@ -1102,60 +1160,6 @@ func (t *testParserSuite) TestJsonV2(c *C) {
 
 func (t *testParserSuite) initTableSchema(tableName ...string) {
 
-	allTables := map[string]string{
-		"test_json_v2": `CREATE TABLE test_json_v2 (
-				id INT,
-				c JSON,
-				PRIMARY KEY (id)
-				) ENGINE=InnoDB`,
-		"test_replication": `CREATE TABLE test_replication (
-					id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
-					str VARCHAR(256),
-					f FLOAT,
-					d DOUBLE,
-					de DECIMAL(10,2),
-					i INT,
-					bi BIGINT,
-					e enum ("e1", "e2"),
-					b BIT(8),
-					y YEAR,
-					da DATE,
-					ts TIMESTAMP,
-					dt DATETIME,
-					tm TIME,
-					t TEXT,
-					bb BLOB,
-					se SET('a', 'b', 'c'),
-					PRIMARY KEY (id)
-				) ENGINE=InnoDB DEFAULT CHARSET=utf8`,
-		"test_json": `CREATE TABLE test_json (
-				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
-				c1 JSON,
-				c2 DECIMAL(10, 0),
-				PRIMARY KEY (id)
-				) ENGINE=InnoDB`,
-		"test_geo": `CREATE TABLE test_geo (id int auto_increment primary key, g GEOMETRY)`,
-		"test_parse_time": `CREATE TABLE test_parse_time (
-			id int auto_increment primary key,
-			a1 DATETIME,
-			a2 DATETIME(3),
-			a3 DATETIME(6),
-			b1 TIMESTAMP,
-			b2 TIMESTAMP(3) ,
-			b3 TIMESTAMP(6))`,
-		"test_simple": `CREATE TABLE test_simple (
-				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
-				c1 varchar(100),
-				c2 int,
-				PRIMARY KEY (id)
-				) ENGINE=InnoDB`,
-		"test_long_text": `CREATE TABLE test_long_text (
-				id BIGINT(64) UNSIGNED  NOT NULL AUTO_INCREMENT,
-				c1 longtext,
-				PRIMARY KEY (id)
-				) ENGINE=InnoDB`,
-	}
-
 	var tables []string
 
 	if len(tableName) > 0 {
@@ -1174,4 +1178,13 @@ func (t *testParserSuite) initTableSchema(tableName ...string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// createTable 初始化时创建所有表
+func (t *testParserSuite) createTables(c *C) {
+	var tables []string
+	for _, value := range allTables {
+		tables = append(tables, value)
+	}
+	t.testExecute(c, tables...)
 }
