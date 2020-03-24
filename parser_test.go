@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -355,7 +354,10 @@ func (t *testParserSuite) checkBinlog(c *C, sqls ...string) {
 func (t *testParserSuite) getBinlog(c *C) []string {
 	// 在线方式解析
 	resultOnline := t.getBinlogWithConfig(c, &t.config)
-	if runtime.GOOS == "linux" {
+
+	// 判断本地文件是否存在
+	if _, err := os.Stat(t.localConfig.StartFile); err == nil {
+		// if runtime.GOOS == "linux" {
 		// 本地解析
 		resultLocal := t.getBinlogWithConfig(c, &t.localConfig)
 
@@ -363,6 +365,8 @@ func (t *testParserSuite) getBinlog(c *C) []string {
 		for i, line := range resultOnline {
 			c.Assert(line, Equals, resultLocal[i], Commentf("%#v", resultOnline))
 		}
+	} else {
+		log.Warnf("跳过本地文件解析! 本地文件不存在:%s", t.localConfig.StartFile)
 	}
 
 	return resultOnline
