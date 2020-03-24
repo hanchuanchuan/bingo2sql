@@ -126,7 +126,16 @@ func (t *testParserSuite) setBinlogDir(c *C) {
 
 	t.localConfig.StartFile = fmt.Sprintf("%s.000001", basename)
 	localConfig.StartFile = fmt.Sprintf("%s.000001", basename)
-	// log.Errorf("%#v", ss)
+	log.Infof("开始本地日志文件:%s", localConfig.StartFile)
+
+	result, err = t.c.Execute("show master logs")
+	c.Assert(err, IsNil)
+
+	basename, err = result.GetString(0, 1)
+	c.Assert(err, IsNil)
+	t.config.StartFile = basename
+	defaultConfig.StartFile = basename
+	log.Infof("开始日志文件:%s", basename)
 
 }
 
