@@ -471,7 +471,7 @@ func (p *MyBinlogParser) checkFinish(currentPosition *mysql.Position) int {
 		stopMsg = "超出指定结束文件"
 		returnValue = 1
 	} else if p.cfg.StopPosition > 0 && currentPosition.Name == p.stopFile {
-		if currentPosition.Pos > uint32(p.cfg.StopPosition) {
+		if currentPosition.Pos < uint32(p.cfg.StopPosition) {
 			stopMsg = "超出指定位置"
 			returnValue = 1
 		} else if currentPosition.Pos == uint32(p.cfg.StopPosition) {
