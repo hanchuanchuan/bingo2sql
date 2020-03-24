@@ -17,7 +17,7 @@ jobs:
       - image: circleci/golang:1.13
       # - image: circleci/mysql:5.7
       - image: mysql:5.7
-        command: mysqld --lower_case_table_names=1 --character-set-server=utf8mb4  --collation-server=utf8mb4_bin --innodb-large-prefix=true --log-bin=on --server_id=111 --explicit_defaults_for_timestamp=true --gtid-mode=1 --enforce_gtid_consistency=1 --log-slave-updates=1 --innodb_buffer_pool_size=512M
+        command: mysqld --lower_case_table_names=1 --character-set-server=utf8mb4  --collation-server=utf8mb4_bin --innodb-large-prefix=true --log-bin=on --server_id=111 --explicit_defaults_for_timestamp=true --gtid-mode=1 --enforce_gtid_consistency=1 --log-slave-updates=1 --innodb_buffer_pool_size=512M --max_allowed_packet=64M
         environment:
           MYSQL_ALLOW_EMPTY_PASSWORD: true
           TZ: "Asia/Shanghai"
