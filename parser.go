@@ -499,7 +499,7 @@ func (p *MyBinlogParser) checkFinish(currentPosition *mysql.Position) int {
 			"结束文件": p.stopFile,
 			"当前位置": currentPosition.Pos,
 			"结束位置": p.cfg.StopPosition,
-		}).Info("已超出指定位置")
+		}).Info(stopMsg)
 	}
 	return returnValue
 }
@@ -918,9 +918,8 @@ func (p *MyBinlogParser) parserInit() error {
 					p.startFile = masterLog.Name
 				}
 
-				if p.stopTimestamp > 0 && timestamp <= p.stopTimestamp {
+				if p.stopFile == "" && p.stopTimestamp > 0 && timestamp >= p.stopTimestamp {
 					p.stopFile = masterLog.Name
-					break
 				}
 			}
 		}
