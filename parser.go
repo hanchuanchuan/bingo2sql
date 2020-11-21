@@ -246,6 +246,9 @@ type MyBinlogParser struct {
 	currentThreadID  uint32         // 当前event线程号
 	changeRows       int            // 解析SQL行数
 	currentTimtstamp uint32         // 当前解析到的时间戳
+
+	// 保存binlogs文件和position,用以计算percent
+	binlogs []MasterLog
 }
 
 var (
@@ -897,15 +900,15 @@ func (p *MyBinlogParser) parserInit() error {
 	// 如果未指定开始文件,就自动解析
 	if len(p.startFile) == 0 {
 
-		binlogIndex := p.autoParseBinlogPosition()
-		if len(binlogIndex) == 0 {
+		binlogs := p.autoParseBinlogPosition()
+		if len(binlogs) == 0 {
 			p.checkError(errors.New("无法获取master binlog"))
 		}
 
-		p.startFile = binlogIndex[0].Name
+		p.startFile = binlogs[0].Name
 
 		if p.startTimestamp > 0 || p.stopTimestamp > 0 {
-			for _, masterLog := range binlogIndex {
+			for _, masterLog := range binlogs {
 				timestamp, err := p.getBinlogFirstTimestamp(masterLog.Name)
 				p.checkError(err)
 
@@ -1602,9 +1605,13 @@ func (p *MyBinlogParser) mysqlMasterStatus() (*MasterStatus, error) {
 
 func (p *MyBinlogParser) autoParseBinlogPosition() []MasterLog {
 
+	if p.binlogs != nil {
+		return p.binlogs
+	}
 	var binlogIndex []MasterLog
 	p.db.Raw("SHOW MASTER LOGS").Scan(&binlogIndex)
 
+	p.binlogs = binlogIndex
 	return binlogIndex
 }
 
@@ -2292,10 +2299,17 @@ func (p *MyBinlogParser) ParseRows() int {
 
 // Percent 获取解析百分比
 func (p *MyBinlogParser) Percent() int {
-	if p.cfg.StartFile != "" && p.cfg.StartFile == p.cfg.StopFile {
-		if p.cfg.StopPosition > 0 {
-			return (int(p.currentPosition.Pos) - p.cfg.StartPosition) * 100 / (p.cfg.StopPosition - p.cfg.StartPosition)
+	if p.cfg.StartFile != "" {
+		start := mysql.Position{
+			Name: p.cfg.StartFile,
+			Pos:  uint32(p.cfg.StartPosition),
 		}
+		stop := mysql.Position{
+			Name: p.cfg.StopFile,
+			Pos:  uint32(p.cfg.StopPosition),
+		}
+		return ComputePercent(start, stop, p.currentPosition,
+			*p.masterStatus, p.autoParseBinlogPosition())
 	}
 
 	if p.stopTimestamp > 0 {
@@ -2353,4 +2367,75 @@ func getTableName(e *replication.RowsEvent) string {
 	build.Write(e.Table.Table)
 	build.WriteString("`")
 	return build.String()
+}
+
+func ComputePercent(start, stop, currnet mysql.Position,
+	masterStatus MasterStatus, binlogs []MasterLog) int {
+	if start.Name == stop.Name && stop.Pos > 0 {
+		return int((currnet.Pos - start.Pos) * 100 / (stop.Pos - start.Pos))
+	} else {
+		stopFile := stop.Name
+		stopPosition := int(stop.Pos)
+		if stopFile == "" {
+			stopFile = masterStatus.File
+			stopPosition = masterStatus.Position
+		}
+		total := 0
+		parsed := 0
+		for _, binlog := range binlogs {
+			if binlog.Name < start.Name {
+				continue
+			}
+			if binlog.Name > stopFile {
+				break
+			}
+			// log.Info("---")
+			// log.Infof("total: %d, parsed: %d, binlog: %s  %v",
+			// 	total, parsed, binlog.Name, binlog.Size)
+			// 第一个日志文件指定了文件
+			if binlog.Name == start.Name && binlog.Size > int(start.Pos) {
+				total += binlog.Size - int(start.Pos)
+			} else if binlog.Name == stopFile {
+				// 最后一个日志文件
+				if stopPosition > 0 {
+					total += stopPosition
+				} else {
+					total += binlog.Size
+				}
+			} else if binlog.Name < stopFile {
+				total += binlog.Size
+			}
+
+			if currnet.Name == binlog.Name {
+				if binlog.Name == start.Name {
+					if currnet.Pos > start.Pos {
+						parsed += int(currnet.Pos - start.Pos)
+					}
+				} else {
+					parsed += int(currnet.Pos)
+				}
+			} else if binlog.Name < currnet.Name {
+				if binlog.Name == start.Name {
+					if binlog.Size > int(start.Pos) {
+						parsed += binlog.Size - int(start.Pos)
+					}
+				} else {
+					parsed += binlog.Size
+				}
+			}
+
+			// log.Infof("total: %d, parsed: %d, binlog: %s  %v",
+			// 	total, parsed, binlog.Name, binlog.Size)
+		}
+		pecent := 0
+		if total > 0 {
+			pecent = parsed * 100 / total
+		}
+		if parsed >= total {
+			pecent = 100
+		}
+		// log.Infof("parsed: %d, total: %d,  percent: %v",
+		// 	parsed, total, pecent)
+		return pecent
+	}
 }

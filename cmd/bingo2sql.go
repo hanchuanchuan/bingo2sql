@@ -372,8 +372,7 @@ func parseBinlog(c echo.Context) error {
 		return err
 	}
 
-	fmt.Println(cfg)
-	fmt.Printf("%#v\n", cfg)
+	log.Infof("config: %#v", cfg)
 
 	// 指定默认的socket用户,用来生成SQL文件
 	if cfg.SocketUser == "" {
@@ -409,8 +408,11 @@ func parseBinlog(c echo.Context) error {
 		// parserProcess[id] = p
 		parserProcess.Store(id, p)
 		go func() {
-			// defer delete(parserProcess, id)
-			defer parserProcess.Delete(id)
+			defer func() {
+				time.AfterFunc(time.Minute, func() {
+					parserProcess.Delete(id)
+				})
+			}()
 			p.Parser()
 		}()
 

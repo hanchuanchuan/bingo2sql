@@ -191,7 +191,6 @@ endif
 .PHONY: release
 release:
 	@echo "$(CGREEN)Cross platform building for release ...$(CEND)"
-	@mkdir -p release
 	# @for GOOS in linux; do
 	@for GOOS in windows darwin linux; do \
 		echo "Building $${GOOS}-$${GOARCH} ..."; \

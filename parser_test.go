@@ -1195,3 +1195,81 @@ func (t *testParserSuite) createTables(c *C) {
 	}
 	t.testExecute(c, tables...)
 }
+
+func TestComputePercent(t *testing.T) {
+	start := mysql.Position{
+		Name: "001",
+		Pos:  0,
+	}
+	stop := mysql.Position{
+		Name: "001",
+		Pos:  0,
+	}
+	current := mysql.Position{
+		Name: "001",
+		Pos:  100,
+	}
+	master := bingo2sql.MasterStatus{
+		File:     "002",
+		Position: 600,
+	}
+	binlogs := []bingo2sql.MasterLog{
+		{
+			Name: "001",
+			Size: 1000,
+		},
+		{
+			Name: "002",
+			Size: 1000,
+		},
+	}
+
+	pct := bingo2sql.ComputePercent(start, stop, current,
+		master, binlogs)
+	expected := 10
+	if pct != expected {
+		t.Errorf("got %v expected %v", pct, expected)
+	}
+
+	stop = mysql.Position{
+		Name: "002",
+		Pos:  0,
+	}
+	pct = bingo2sql.ComputePercent(start, stop, current,
+		master, binlogs)
+	expected = 5
+	if pct != expected {
+		t.Errorf("got %v expected %v", pct, expected)
+	}
+
+	stop = mysql.Position{
+		Name: "003",
+		Pos:  0,
+	}
+	pct = bingo2sql.ComputePercent(start, stop, current,
+		master, binlogs)
+	expected = 5
+	if pct != expected {
+		t.Errorf("got %v expected %v", pct, expected)
+	}
+
+	start = mysql.Position{
+		Name: "001",
+		Pos:  200,
+	}
+	stop = mysql.Position{
+		Name: "",
+		Pos:  0,
+	}
+	current = mysql.Position{
+		Name: "002",
+		Pos:  400,
+	}
+	pct = bingo2sql.ComputePercent(start, stop, current,
+		master, binlogs)
+	expected = 85
+	if pct != expected {
+		t.Errorf("got %v expected %v", pct, expected)
+	}
+
+}
