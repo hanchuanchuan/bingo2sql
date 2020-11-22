@@ -200,7 +200,7 @@ type baseParser struct {
 	// write interface{}
 
 	OnlyDatabases map[string]bool
-	OnlyTables    map[string]bool
+	OnlyTables    map[string]string
 	SqlTypes      map[string]bool
 
 	// 本地解析模式.指定binlog文件和表结构本地解析
@@ -449,7 +449,7 @@ func (p *MyBinlogParser) Parser() error {
 		}
 	}
 
-	log.Info("解析完成")
+	log.WithField("parsed_rows", p.changeRows).Info("解析完成")
 	return nil
 }
 
@@ -682,7 +682,8 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	p.cfg = cfg
 
 	p.OnlyDatabases = make(map[string]bool)
-	p.OnlyTables = make(map[string]bool)
+	// [table_name] = db_name
+	p.OnlyTables = make(map[string]string)
 	p.SqlTypes = make(map[string]bool)
 
 	p.startFile = cfg.StartFile
@@ -951,16 +952,30 @@ func (p *MyBinlogParser) parserInit() error {
 	}
 
 	if len(p.cfg.Databases) > 0 {
-		for _, s := range strings.Split(p.cfg.Databases, ",") {
-			p.OnlyDatabases[s] = true
+		for _, db := range strings.Split(p.cfg.Databases, ",") {
+			db = strings.ToLower(strings.Trim(db, " `"))
+			p.OnlyDatabases[db] = true
 		}
 	}
 
 	if len(p.cfg.Tables) > 0 {
 		for _, s := range strings.Split(p.cfg.Tables, ",") {
-			p.OnlyTables[s] = true
+			if strings.Contains(s, ".") {
+				names := strings.SplitN(s, ".", 2)
+				db, table := names[0], names[1]
+				db = strings.ToLower(strings.Trim(db, " `"))
+				table = strings.ToLower(strings.Trim(table, " `"))
+				p.OnlyTables[table] = db
+			} else {
+				key := strings.ToLower(strings.Trim(s, " `"))
+				p.OnlyTables[key] = ""
+			}
+
 		}
 	}
+
+	// log.Infof("dbs: %#v", p.OnlyDatabases)
+	// log.Infof("tbls: %#v", p.OnlyTables)
 
 	return nil
 }
@@ -1057,14 +1072,18 @@ func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
 	if len(p.OnlyDatabases) == 0 && len(p.OnlyTables) == 0 {
 		return true
 	}
-
+	dbName := strings.ToLower(string(table.Schema))
 	if len(p.OnlyDatabases) > 0 {
-		if _, ok := (p.OnlyDatabases)[string(table.Schema)]; !ok {
+		if _, ok := p.OnlyDatabases[dbName]; !ok {
 			return false
 		}
 	}
+	tableName := strings.ToLower(string(table.Table))
 	if len(p.OnlyTables) > 0 {
-		if _, ok := (p.OnlyTables)[strings.ToLower(string(table.Table))]; !ok {
+
+		if db, ok := p.OnlyTables[tableName]; !ok {
+			return false
+		} else if db != "" && db != dbName {
 			return false
 		}
 	}
@@ -1983,8 +2002,8 @@ func (p *MyBinlogParser) cacheNewTable(t *Table) {
 
 	key = strings.ToLower(key)
 
-	p.OnlyTables[strings.ToLower(t.TableName)] = true
 	p.tableCacheList[key] = t
+	p.OnlyTables[strings.ToLower(t.TableName)] = t.Schema
 }
 
 // buildTableInfo 构建表结构
