@@ -358,7 +358,7 @@ func (p *MyBinlogParser) Parser() error {
 	s, err := b.StartSync(p.currentPosition)
 	if err != nil {
 		log.Infof("Start sync error: %v\n", err)
-		return nil
+		return err
 	}
 
 	sendTime := time.Now().Add(time.Second * 5)
@@ -387,7 +387,7 @@ func (p *MyBinlogParser) Parser() error {
 			//  log.Info(e.Header.EventType)
 			// }
 			log.Errorf("Get event error: %v\n", err)
-			break
+			return err
 		}
 
 		ok, err := p.parseSingleEvent(e)
