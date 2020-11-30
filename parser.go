@@ -226,8 +226,6 @@ type MyBinlogParser struct {
 	// 使用buffer用时1min
 	bufferWriter *bufio.Writer
 
-	// running bool
-
 	// lastTimestamp uint32
 
 	gtid      []byte
@@ -449,6 +447,7 @@ func (p *MyBinlogParser) Parser() error {
 		}
 	}
 
+	p.running = false
 	log.WithField("parsed_rows", p.changeRows).Info("解析完成")
 	return nil
 }
@@ -2318,6 +2317,9 @@ func (p *MyBinlogParser) ParseRows() int {
 
 // Percent 获取解析百分比
 func (p *MyBinlogParser) Percent() int {
+	if !p.running {
+		return 100
+	}
 	if p.cfg.StartFile != "" {
 		start := mysql.Position{
 			Name: p.cfg.StartFile,
