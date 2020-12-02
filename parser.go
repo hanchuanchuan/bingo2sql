@@ -267,12 +267,16 @@ func (cfg *BinlogParserConfig) ID() string {
 		s1 = s1[:20]
 	}
 	var s2 string
-	if len(cfg.StartTime) > 0 {
-		s2 = strings.Replace(cfg.StartTime, ".", "_", -1)
-		s2 = strings.Replace(s2, " ", "_", -1)
-		s2 = strings.Replace(s2, ":", "", -1)
-	} else {
-		s2 = strconv.FormatInt(cfg.beginTime, 10)
+	// if len(cfg.StartTime) > 0 {
+	// 	s2 = strings.Replace(cfg.StartTime, ".", "_", -1)
+	// 	s2 = strings.Replace(s2, " ", "_", -1)
+	// 	s2 = strings.Replace(s2, ":", "", -1)
+	// } else {
+	// 	s2 = strconv.FormatInt(cfg.beginTime, 10)
+	// }
+	s2 = strconv.FormatInt(cfg.beginTime, 10)
+	if cfg.Flashback {
+		s2 += "_rollback"
 	}
 	return fmt.Sprintf("%s_%d_%s",
 		s1,
@@ -384,7 +388,11 @@ func (p *MyBinlogParser) Parser() error {
 			//  log.Info("===============")
 			//  log.Info(e.Header.EventType)
 			// }
-			log.Errorf("Get event error: %v\n", err)
+			if err == context.DeadlineExceeded {
+				log.Warnf("Waiting for timeout(10s), no new event is generated, automatic shutdown: %v\n", err)
+			} else {
+				log.Errorf("Get event error: %v\n", err)
+			}
 			return err
 		}
 
