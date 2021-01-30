@@ -24,13 +24,12 @@ jobs:
         # volumes:
         #   - /var/lib/mysql:/var/lib/mysql
 
-
     working_directory: /go/src/github.com/hanchuanchuan/bingo2sql
 
     steps:
       - run:
           name: Install mysql-client
-          command: sudo apt install default-mysql-client
+          command: sudo apt-get update && sudo apt install default-mysql-client
       - checkout
       - run:
           name: Waiting for MySQL to be ready
