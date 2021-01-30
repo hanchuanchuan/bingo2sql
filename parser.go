@@ -247,6 +247,9 @@ type MyBinlogParser struct {
 
 	// 保存binlogs文件和position,用以计算percent
 	binlogs []MasterLog
+
+	// 表结构发生变化后导致无法正确解析的列表
+	ignoreTables map[string]interface{}
 }
 
 var (
@@ -371,6 +374,9 @@ func (p *MyBinlogParser) Parser() error {
 
 	var ctx context.Context
 	var cancel context.CancelFunc
+
+	var finishError error
+FOR:
 	for {
 		if p.cfg.StopNever {
 			ctx = context.Background()
@@ -393,15 +399,17 @@ func (p *MyBinlogParser) Parser() error {
 			} else {
 				log.Errorf("Get event error: %v\n", err)
 			}
-			return err
+			finishError = err
+			break FOR
 		}
 
 		ok, err := p.parseSingleEvent(e)
 		if err != nil {
-			return err
+			finishError = err
+			break FOR
 		}
 		if !ok {
-			break
+			break FOR
 		}
 
 		if len(p.cfg.SocketUser) > 0 {
@@ -421,7 +429,6 @@ func (p *MyBinlogParser) Parser() error {
 	}
 
 	close(p.ch)
-
 	wg.Wait()
 
 	if len(p.cfg.SocketUser) > 0 {
@@ -457,7 +464,7 @@ func (p *MyBinlogParser) Parser() error {
 
 	p.running = false
 	log.WithField("parsed_rows", p.changeRows).Info("解析完成")
-	return nil
+	return finishError
 }
 
 // checkFinish 检查是否需要结束循环
@@ -692,6 +699,7 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	// [table_name] = db_name
 	p.OnlyTables = make(map[string]string)
 	p.SqlTypes = make(map[string]bool)
+	p.ignoreTables = make(map[string]interface{})
 
 	p.startFile = cfg.StartFile
 	p.stopFile = cfg.StopFile
@@ -1101,10 +1109,10 @@ func (p *MyBinlogParser) schemaFilter(table *replication.TableMapEvent) bool {
 func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
 	tableName := getTableName(e)
-	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
-			tableName, len(t.Columns), e.ColumnCount)
-	}
+	// if len(t.Columns) < int(e.ColumnCount) {
+	// 	return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+	// 		tableName, len(t.Columns), e.ColumnCount)
+	// }
 
 	var columnNames []string
 	c := "`%s`"
@@ -1173,14 +1181,27 @@ func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 	return nil
 }
 
+func (p *MyBinlogParser) checkCanParse(t *Table, e *replication.RowsEvent) bool {
+	if len(t.Columns) < int(e.ColumnCount) {
+		tableName := getTableName(e)
+		if _, ok := p.ignoreTables[tableName]; !ok {
+			p.ignoreTables[tableName] = nil
+			log.Warn(fmt.Sprintf("表%s缺少列,已忽略.(当前列数:%d,binlog的列数%d)",
+				tableName, len(t.Columns), e.ColumnCount))
+		}
+		return false
+	}
+	return true
+}
+
 // generateDeleteSQL 生成delete语句
 func (p *MyBinlogParser) generateDeleteSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
 	tableName := getTableName(e)
-	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
-			tableName, len(t.Columns), e.ColumnCount)
-	}
+	// if len(t.Columns) < int(e.ColumnCount) {
+	// 	return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+	// 		tableName, len(t.Columns), e.ColumnCount)
+	// }
 
 	template := "DELETE FROM %s WHERE"
 
@@ -1289,10 +1310,10 @@ func abs(n int64) int64 {
 func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
 	tableName := getTableName(e)
-	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
-			tableName, len(t.Columns), e.ColumnCount)
-	}
+	// if len(t.Columns) < int(e.ColumnCount) {
+	// 	return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+	// 		tableName, len(t.Columns), e.ColumnCount)
+	// }
 
 	template := "UPDATE %s SET%s WHERE"
 
@@ -1415,10 +1436,10 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 func (p *MyBinlogParser) generateUpdateRollbackSQL(t *Table, e *replication.RowsEvent,
 	binEvent *replication.BinlogEvent) error {
 	tableName := getTableName(e)
-	if len(t.Columns) < int(e.ColumnCount) {
-		return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
-			tableName, len(t.Columns), e.ColumnCount)
-	}
+	// if len(t.Columns) < int(e.ColumnCount) {
+	// 	return fmt.Errorf("表%s缺少列!当前列数:%d,binlog的列数%d",
+	// 		tableName, len(t.Columns), e.ColumnCount)
+	// }
 
 	template := "UPDATE %s SET%s WHERE"
 
@@ -2254,7 +2275,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 
 		switch e.Header.EventType {
 		case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
-			if _, ok := p.SqlTypes["insert"]; ok {
+			if _, ok := p.SqlTypes["insert"]; ok && p.checkCanParse(table, event) {
 				if p.cfg.Flashback {
 					err = p.generateDeleteSQL(table, event, e)
 				} else {
@@ -2263,7 +2284,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 				p.changeRows = p.changeRows + len(event.Rows)
 			}
 		case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
-			if _, ok := p.SqlTypes["delete"]; ok {
+			if _, ok := p.SqlTypes["delete"]; ok && p.checkCanParse(table, event) {
 				if p.cfg.Flashback {
 					err = p.generateInsertSQL(table, event, e)
 				} else {
@@ -2272,7 +2293,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 				p.changeRows = p.changeRows + len(event.Rows)
 			}
 		case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
-			if _, ok := p.SqlTypes["update"]; ok {
+			if _, ok := p.SqlTypes["update"]; ok && p.checkCanParse(table, event) {
 				if p.cfg.Flashback {
 					err = p.generateUpdateRollbackSQL(table, event, e)
 				} else {

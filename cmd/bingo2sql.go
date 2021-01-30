@@ -413,7 +413,10 @@ func parseBinlog(c echo.Context) error {
 					parserProcess.Delete(id)
 				})
 			}()
-			p.Parser()
+			err := p.Parser()
+			if err != nil {
+				log.Error(err)
+			}
 		}()
 
 		r := map[string]string{"id": id}
