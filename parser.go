@@ -395,7 +395,9 @@ FOR:
 			//  log.Info(e.Header.EventType)
 			// }
 			if err == context.DeadlineExceeded {
-				log.Warnf("Waiting for timeout(10s), no new event is generated, automatic shutdown: %v\n", err)
+				log.Warnf("Waiting for timeout(10s), no new event is generated, automatically stop: %v\n", err)
+				// err = fmt.Errorf("Waiting for timeout(10s), no new event is generated, automatically stop: %v\n", err)
+				err = nil
 			} else {
 				log.Errorf("Get event error: %v\n", err)
 			}
@@ -937,7 +939,7 @@ func (p *MyBinlogParser) parserInit() error {
 					p.startFile = masterLog.Name
 				}
 
-				if p.stopFile == "" && p.stopTimestamp > 0 && timestamp >= p.stopTimestamp {
+				if p.stopFile == "" && p.stopTimestamp > 0 && timestamp > p.stopTimestamp {
 					p.stopFile = masterLog.Name
 				}
 			}
@@ -2316,7 +2318,7 @@ func (p *MyBinlogParser) parseSingleEvent(e *replication.BinlogEvent) (ok bool, 
 
 	// 再次判断是否到结束位置,以免处在临界值,且无新日志时程序卡住
 	if e.Header.Timestamp > 0 {
-		if p.stopTimestamp > 0 && e.Header.Timestamp >= p.stopTimestamp {
+		if p.stopTimestamp > 0 && e.Header.Timestamp > p.stopTimestamp {
 			log.Warn("已超出结束时间")
 			return false, nil
 		}
@@ -2363,7 +2365,7 @@ func (p *MyBinlogParser) Percent() int {
 	}
 
 	if p.stopTimestamp > 0 {
-		if p.currentTimtstamp < p.startTimestamp {
+		if p.currentTimtstamp < p.startTimestamp || p.stopTimestamp == p.startTimestamp {
 			return 0
 		} else {
 			return int((p.currentTimtstamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp))
