@@ -6,11 +6,6 @@ general:
       - gh-pages
 
 jobs:
-  deploy-job:
-    steps:
-      - add_ssh_keys:
-          fingerprints:
-            - "42:94:88:f4:be:ff:0b:b9:e8:ae:05:26:f1:e7:fd:57"
   build:
     branches:
       ignore: gh-pages
@@ -35,6 +30,9 @@ jobs:
       - run:
           name: Install mysql-client
           command: sudo apt-get update -y --allow-releaseinfo-change && sudo apt upgrade -y && sudo apt-get install default-mysql-client && sudo apt-get install --reinstall ca-certificates libgnutls30 -y
+      - add_ssh_keys:
+          fingerprints:
+            - "42:94:88:f4:be:ff:0b:b9:e8:ae:05:26:f1:e7:fd:57"
       - checkout
       - run:
           name: Waiting for MySQL to be ready
