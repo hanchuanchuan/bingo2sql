@@ -41,6 +41,18 @@ type Column struct {
 	ColumnComment    string `gorm:"Column:COLUMN_COMMENT"`
 	ColumnType       string `gorm:"Column:COLUMN_TYPE"`
 	ColumnKey        string `gorm:"Column:COLUMN_KEY"`
+	Extra            string `gorm:"Column:EXTRA"`
+	isGenerated      *bool  `gorm:"-"`
+}
+
+// IsGenerated 是否为计算列
+func (f *Column) IsGenerated() bool {
+	if f.isGenerated == nil {
+		v := strings.Contains(f.Extra, "VIRTUAL GENERATED") ||
+			strings.Contains(f.Extra, "STORED GENERATED")
+		f.isGenerated = &v
+	}
+	return *f.isGenerated
 }
 
 // IsUnsigned 是否无符号列
@@ -63,6 +75,19 @@ type Table struct {
 	Columns    []Column
 	hasPrimary bool
 	primarys   map[int]bool
+}
+
+// ValidColumns 可用列
+func (t *Table) ValidColumns() (result []Column) {
+	if t == nil {
+		return
+	}
+	for _, f := range t.Columns {
+		if !f.IsGenerated() {
+			result = append(result, f)
+		}
+	}
+	return result
 }
 
 // MasterStatus 主库binlog信息（相对bingo2sql的主库，可以是只读库）
@@ -1124,7 +1149,7 @@ func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 	}
 
 	for i, col := range t.Columns {
-		if i < int(e.ColumnCount) {
+		if i < int(e.ColumnCount) && !col.IsGenerated() {
 			//  有主键且设置去除主键时 作特殊处理
 			if t.hasPrimary && p.cfg.RemovePrimary {
 				if _, ok := t.primarys[i]; !ok {
@@ -1150,6 +1175,9 @@ func (p *MyBinlogParser) generateInsertSQL(t *Table, e *replication.RowsEvent,
 	for _, rows := range e.Rows {
 
 		for i, d := range rows {
+			if t.Columns[i].IsGenerated() {
+				continue
+			}
 			if t.hasPrimary && p.cfg.RemovePrimary {
 				if _, ok := t.primarys[i]; ok {
 					continue
@@ -1339,7 +1367,7 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 
 	if !minimalMode {
 		for i, col := range t.Columns {
-			if i < int(e.ColumnCount) {
+			if i < int(e.ColumnCount) && !col.IsGenerated() {
 				sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
 			}
 		}
@@ -1354,6 +1382,7 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 		newValues []driver.Value
 		newSql    string
 	)
+
 	// update时, Rows为2的倍数, 双数index为旧值,单数index为新值
 	for i, rows := range e.Rows {
 
@@ -1362,9 +1391,11 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 			columnNames = nil
 
 			for j, d := range rows {
+				if t.Columns[j].IsGenerated() {
+					continue
+				}
 				if t.hasPrimary {
-					_, ok := t.primarys[j]
-					if ok {
+					if _, ok := t.primarys[j]; ok {
 						oldValues = append(oldValues, d)
 
 						if d == nil {
@@ -1393,6 +1424,9 @@ func (p *MyBinlogParser) generateUpdateSQL(t *Table, e *replication.RowsEvent,
 		} else {
 			// 新值
 			for j, d := range rows {
+				if t.Columns[j].IsGenerated() {
+					continue
+				}
 				if minimalMode {
 					// 最小化模式下,列如果相等则省略
 					if !compareValue(d, e.Rows[i-1][j]) {
@@ -1459,7 +1493,7 @@ func (p *MyBinlogParser) generateUpdateRollbackSQL(t *Table, e *replication.Rows
 
 	if !minimalMode {
 		for i, col := range t.Columns {
-			if i < int(e.ColumnCount) {
+			if i < int(e.ColumnCount) && !col.IsGenerated() {
 				sets = append(sets, fmt.Sprintf(setValue, col.ColumnName))
 			}
 		}
@@ -1477,6 +1511,9 @@ func (p *MyBinlogParser) generateUpdateRollbackSQL(t *Table, e *replication.Rows
 		if i%2 == 0 {
 			// 旧值
 			for j, d := range rows {
+				if t.Columns[j].IsGenerated() {
+					continue
+				}
 				if minimalMode {
 					// 最小化模式下,列如果相等则省略
 					if !compareValue(d, e.Rows[i+1][j]) {
@@ -1502,8 +1539,10 @@ func (p *MyBinlogParser) generateUpdateRollbackSQL(t *Table, e *replication.Rows
 			}
 			for j, d := range rows {
 				if t.hasPrimary {
-					_, ok := t.primarys[j]
-					if ok {
+					if _, ok := t.primarys[j]; ok {
+						if t.Columns[j].IsGenerated() {
+							continue
+						}
 						if t.Columns[j].IsUnsigned() {
 							d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
 						}
@@ -1518,6 +1557,9 @@ func (p *MyBinlogParser) generateUpdateRollbackSQL(t *Table, e *replication.Rows
 						}
 					}
 				} else {
+					if t.Columns[j].IsGenerated() {
+						continue
+					}
 					if t.Columns[j].IsUnsigned() {
 						d = processValue(d, GetDataTypeBase(t.Columns[j].ColumnType))
 					}
@@ -1576,21 +1618,19 @@ func (p *MyBinlogParser) tableInformation(tableId uint64, schema []byte, tableNa
 	sql := `SELECT COLUMN_NAME, ifnull(COLLATION_NAME,'') as COLLATION_NAME,
             ifnull(CHARACTER_SET_NAME,'') as CHARACTER_SET_NAME,
             ifnull(COLUMN_COMMENT,'') as COLUMN_COMMENT, COLUMN_TYPE,
-            ifnull(COLUMN_KEY,'') as COLUMN_KEY
+            ifnull(COLUMN_KEY,'') as COLUMN_KEY,
+			ifnull(EXTRA,'') as EXTRA
             FROM information_schema.columns
             WHERE table_schema = ? and table_name = ?
             ORDER BY ORDINAL_POSITION`
 
-	var allRecord []Column
+	var columns []Column
+	p.db.Raw(sql, string(schema), string(tableName)).Scan(&columns)
 
-	p.db.Raw(sql, string(schema), string(tableName)).Scan(&allRecord)
+	primarys := make(map[int]bool)
+	uniques := make(map[int]bool)
 
-	var primarys map[int]bool
-	primarys = make(map[int]bool)
-
-	var uniques map[int]bool
-	uniques = make(map[int]bool)
-	for i, r := range allRecord {
+	for i, r := range columns {
 		if r.ColumnKey == "PRI" {
 			primarys[i] = true
 		}
@@ -1601,7 +1641,7 @@ func (p *MyBinlogParser) tableInformation(tableId uint64, schema []byte, tableNa
 
 	newTable := new(Table)
 	newTable.tableID = tableId
-	newTable.Columns = allRecord
+	newTable.Columns = columns
 
 	// if !p.cfg.AllColumns {
 	if len(primarys) > 0 {
@@ -2095,6 +2135,12 @@ func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
 			c.ColumnKey = "UNI"
 		case ast.ColumnOptionAutoIncrement:
 			// c.Extra += "auto_increment"
+		case ast.ColumnOptionGenerated:
+			if op.Stored {
+				c.Extra += " STORED GENERATED"
+			} else {
+				c.Extra += " VIRTUAL GENERATED"
+			}
 		}
 	}
 

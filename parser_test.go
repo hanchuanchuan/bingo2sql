@@ -76,6 +76,11 @@ var allTables = map[string]string{
 			c1 longtext,
 			PRIMARY KEY (id)
 			) ENGINE=InnoDB`,
+	"test_generated": `CREATE TABLE IF NOT EXISTS test_generated (
+			id int primary key,
+			price int,
+			number int,
+			total int generated always as (price*number))`,
 }
 
 var (
@@ -435,9 +440,9 @@ func (t *testParserSuite) getBinlog(c *C) []string {
 		// 本地解析
 		resultLocal := t.getBinlogWithConfig(c, &t.localConfig)
 
-		c.Assert(len(resultOnline), Equals, len(resultLocal), Commentf("%#v", resultOnline))
+		c.Assert(len(resultOnline), Equals, len(resultLocal), Commentf("local: %#v, online: %#v", resultLocal, resultOnline))
 		for i, line := range resultOnline {
-			c.Assert(line, Equals, resultLocal[i], Commentf("%#v", resultOnline))
+			c.Assert(line, Equals, resultLocal[i], Commentf("local: %#v, online: %#v", resultLocal[i], resultOnline))
 		}
 	} else {
 		log.Warnf("跳过本地文件解析! 本地文件不存在:%s", t.localConfig.StartFile)
@@ -776,7 +781,33 @@ func (t *testParserSuite) TestMinimalUpdate(c *C) {
 		"UPDATE `test`.`test_replication` SET `f`=-12.14, `de`=555.34 WHERE `id`=100;",
 		"UPDATE `test`.`test_replication` SET `str`=NULL WHERE `id`=100;",
 	)
+}
 
+func (t *testParserSuite) TestFieldGenerated(c *C) {
+	t.setupTest(c, mysql.MySQLFlavor)
+
+	id := 1
+	t.testExecute(c, `RESET MASTER;`,
+		`INSERT INTO test_generated(id,price,number) VALUES (1,1,1),(2,3,4)`,
+		fmt.Sprintf(`UPDATE test_generated SET price = 10, number = 20 WHERE id = %d`, id),
+		fmt.Sprintf(`delete from test_generated WHERE id = %d`, id),
+	)
+
+	// t.SetSQLType("insert")
+	t.SetSQLType("insert,update,delete")
+
+	t.checkBinlog(c,
+		"INSERT INTO `test`.`test_generated`(`id`,`price`,`number`) VALUES(1,1,1);", "INSERT INTO `test`.`test_generated`(`id`,`price`,`number`) VALUES(2,3,4);", "UPDATE `test`.`test_generated` SET `id`=1, `price`=10, `number`=20 WHERE `id`=1;",
+		"DELETE FROM `test`.`test_generated` WHERE `id`=1;",
+	)
+
+	t.SetFlashback(true)
+	t.checkBinlog(c,
+		"DELETE FROM `test`.`test_generated` WHERE `id`=1;",
+		"DELETE FROM `test`.`test_generated` WHERE `id`=2;",
+		"UPDATE `test`.`test_generated` SET `id`=1, `price`=1, `number`=1 WHERE `id`=1;",
+		"INSERT INTO `test`.`test_generated`(`id`,`price`,`number`) VALUES(1,10,20);",
+	)
 }
 
 func (t *testParserSuite) TestTextMax(c *C) {
@@ -1190,8 +1221,9 @@ func (t *testParserSuite) initTableSchema(tableName ...string) {
 // createTable 初始化时创建所有表
 func (t *testParserSuite) createTables(c *C) {
 	var tables []string
-	for _, value := range allTables {
+	for tableName, value := range allTables {
 		tables = append(tables, value)
+		tables = append(tables, fmt.Sprintf("truncate table `%s`;", tableName))
 	}
 	t.testExecute(c, tables...)
 }
