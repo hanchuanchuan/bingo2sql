@@ -6,6 +6,11 @@ general:
       - gh-pages
 
 jobs:
+  deploy-job:
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "42:94:88:f4:be:ff:0b:b9:e8:ae:05:26:f1:e7:fd:57"
   build:
     branches:
       ignore: gh-pages
