@@ -200,6 +200,9 @@ type row struct {
 }
 
 type baseParser struct {
+	ctx      context.Context
+	cancelFn context.CancelFunc
+
 	// 记录表结构以重用
 	allTables map[uint64]*Table
 
@@ -314,15 +317,11 @@ func (cfg *BinlogParserConfig) ID() string {
 
 // Parser 远程解析
 func (p *MyBinlogParser) Parser() error {
-
 	if p.cfg.Host == "" && p.cfg.StartFile != "" {
 		_, err := os.Stat(p.cfg.StartFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("open start_file: %w", err)
 		}
-		// if s.IsDir(){
-
-		// }
 		return p.parserFile()
 	}
 
@@ -358,7 +357,7 @@ func (p *MyBinlogParser) Parser() error {
 			p.outputFile, err = os.Create(p.outputFileName)
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("create output file: %w", err)
 		}
 
 		p.bufferWriter = bufio.NewWriter(p.outputFile)
@@ -388,7 +387,7 @@ func (p *MyBinlogParser) Parser() error {
 	s, err := b.StartSync(p.currentPosition)
 	if err != nil {
 		log.Infof("Start sync error: %v\n", err)
-		return err
+		return fmt.Errorf("Start sync: %w", err)
 	}
 
 	sendTime := time.Now().Add(time.Second * 5)
@@ -404,9 +403,9 @@ func (p *MyBinlogParser) Parser() error {
 FOR:
 	for {
 		if p.cfg.StopNever {
-			ctx = context.Background()
+			ctx = p.ctx
 		} else {
-			ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel = context.WithTimeout(p.ctx, 10*time.Second)
 			defer cancel()
 		}
 		// e, err := s.GetEvent(context.Background())
@@ -426,31 +425,37 @@ FOR:
 			} else {
 				log.Errorf("Get event error: %v\n", err)
 			}
-			finishError = err
+			finishError = fmt.Errorf("get binlog event: %w", err)
 			break FOR
 		}
 
-		ok, err := p.parseSingleEvent(e)
-		if err != nil {
-			finishError = err
+		select {
+		case <-p.ctx.Done():
+			finishError = context.Canceled
 			break FOR
-		}
-		if !ok {
-			break FOR
-		}
+		default:
+			ok, err := p.parseSingleEvent(e)
+			if err != nil {
+				finishError = err
+				break FOR
+			}
+			if !ok {
+				break FOR
+			}
 
-		if len(p.cfg.SocketUser) > 0 {
-			// 如果指定了websocket用户,就每5s发送一次进度通知
-			if p.changeRows > sendCount && time.Now().After(sendTime) {
-				sendCount = p.changeRows
-				sendTime = time.Now().Add(time.Second * 5)
+			if len(p.cfg.SocketUser) > 0 {
+				// 如果指定了websocket用户,就每5s发送一次进度通知
+				if p.changeRows > sendCount && time.Now().After(sendTime) {
+					sendCount = p.changeRows
+					sendTime = time.Now().Add(time.Second * 5)
 
-				kwargs := map[string]interface{}{"rows": p.changeRows}
-				if p.stopTimestamp > 0 && p.startTimestamp > 0 && p.stopTimestamp > p.startTimestamp {
-					kwargs["pct"] = (e.Header.Timestamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp)
+					kwargs := map[string]interface{}{"rows": p.changeRows}
+					if p.stopTimestamp > 0 && p.startTimestamp > 0 && p.stopTimestamp > p.startTimestamp {
+						kwargs["pct"] = (e.Header.Timestamp - p.startTimestamp) * 100 / (p.stopTimestamp - p.startTimestamp)
+					}
+					go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
+
 				}
-				go sendMsg(p.cfg.SocketUser, "binlog_parse_progress", "binlog解析进度", "", kwargs)
-
 			}
 		}
 	}
@@ -605,8 +610,10 @@ func (p *MyBinlogParser) isGtidEventInGtidSet() (status uint8) {
 }
 
 func (p *MyBinlogParser) Stop() {
-	fmt.Println("stoped")
-
+	log.Warn("Process killed")
+	if p.cancelFn != nil {
+		p.cancelFn()
+	}
 	p.running = false
 }
 
@@ -809,6 +816,8 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 	if err := p.parserInit(); err != nil {
 		return nil, err
 	}
+
+	p.ctx, p.cancelFn = context.WithCancel(context.Background())
 
 	return p, nil
 }
