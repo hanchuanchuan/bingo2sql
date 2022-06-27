@@ -7,3 +7,4 @@ coverage.out
 *.log
 *.fail.go
 .DS_Store
+.vscode/
