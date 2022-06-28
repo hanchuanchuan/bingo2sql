@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-mysql-org/go-mysql/client"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/hanchuanchuan/bingo2sql"
-	"github.com/hanchuanchuan/go-mysql/client"
-	"github.com/hanchuanchuan/go-mysql/mysql"
 	. "github.com/pingcap/check"
 	log "github.com/sirupsen/logrus"
 )

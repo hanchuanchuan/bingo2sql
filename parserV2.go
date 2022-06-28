@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanchuanchuan/go-mysql/replication"
+	"github.com/go-mysql-org/go-mysql/replication"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 )

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hanchuanchuan/go-mysql/mysql"
-	"github.com/hanchuanchuan/go-mysql/replication"
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/replication"
 	"github.com/jinzhu/gorm"
 	"github.com/jinzhu/now"
 	"github.com/mholt/archiver/v3"
@@ -148,6 +148,8 @@ type BinlogParserConfig struct {
 	SqlType string `json:"sql_type" form:"sql_type"`
 	// 最大解析行数
 	MaxRows int `json:"max_rows" form:"max_rows"`
+	// 解析线程数,影响文件解析速度
+	Threads int `json:"threads" form:"threads"`
 
 	// 输出到指定文件.为空时输出到控制台
 	OutputFileStr string
@@ -317,6 +319,8 @@ func (cfg *BinlogParserConfig) ID() string {
 
 // Parser 远程解析
 func (p *MyBinlogParser) Parser() error {
+	// runtime.GOMAXPROCS(runtime.NumCPU())
+
 	if p.cfg.Host == "" && p.cfg.StartFile != "" {
 		_, err := os.Stat(p.cfg.StartFile)
 		if err != nil {
@@ -396,20 +400,20 @@ func (p *MyBinlogParser) Parser() error {
 	wg.Add(1)
 	go p.ProcessChan(&wg)
 
-	var ctx context.Context
-	var cancel context.CancelFunc
+	// var ctx context.Context
 
 	var finishError error
 FOR:
 	for {
-		if p.cfg.StopNever {
-			ctx = p.ctx
-		} else {
-			ctx, cancel = context.WithTimeout(p.ctx, 10*time.Second)
-			defer cancel()
-		}
+		// if p.cfg.StopNever {
+		// 	ctx = p.ctx
+		// } else {
+		// 	var cancel context.CancelFunc
+		// 	ctx, cancel = context.WithTimeout(p.ctx, 10*time.Second)
+		// 	defer cancel()
+		// }
 		// e, err := s.GetEvent(context.Background())
-		e, err := s.GetEvent(ctx)
+		e, err := s.GetEvent(p.ctx)
 		if err != nil {
 			// Try to output all left events
 			// events := s.DumpEvents()
@@ -442,6 +446,13 @@ FOR:
 			if !ok {
 				break FOR
 			}
+
+			// if time.Now().After(sendTime) {
+			// 	var m runtime.MemStats
+			// 	runtime.ReadMemStats(&m)
+			// 	log.Debugf("%d MB\n", m.Alloc/1024/1024)
+			// 	sendTime = time.Now().Add(time.Second * 1)
+			// }
 
 			if len(p.cfg.SocketUser) > 0 {
 				// 如果指定了websocket用户,就每5s发送一次进度通知
@@ -562,6 +573,10 @@ func (p *MyBinlogParser) clear() {
 	}
 }
 
+// isGtidEventInGtidSet 检查gtid事件
+// 0 正常,包含
+// 1 跳转,不包含
+// 2 超出结束位置,跳过
 func (p *MyBinlogParser) isGtidEventInGtidSet() (status uint8) {
 
 	e := p.gtidEvent
@@ -645,11 +660,8 @@ func byteEquals(v1, v2 []byte) bool {
 	return true
 }
 
-// func (p *MyBinlogParser) myWrite(b []byte, binEvent *replication.BinlogEvent, gtid []byte) {
 func (p *MyBinlogParser) myWrite(data *row) {
-
 	var buf bytes.Buffer
-
 	// 输出GTID
 	if p.Config().ShowGTID && len(data.gtid) > 0 {
 		if len(p.lastGtid) == 0 {
@@ -664,7 +676,6 @@ func (p *MyBinlogParser) myWrite(data *row) {
 			buf.Write(data.gtid)
 			buf.WriteString("\n")
 		}
-
 	}
 
 	buf.Write(data.sql)
@@ -707,7 +718,6 @@ func (p *MyBinlogParser) myWrite(data *row) {
 }
 
 func (p *MyBinlogParser) write2(b []byte) {
-
 	if len(p.outputFileName) > 0 {
 		p.bufferWriter.Write(b)
 	} else {
@@ -722,7 +732,7 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 
 	p.allTables = make(map[uint64]*Table)
 	p.jumpGtids = make(map[*GtidSetInfo]bool)
-	p.ch = make(chan *row, 100)
+	p.ch = make(chan *row, cfg.Threads)
 
 	p.write1 = p
 

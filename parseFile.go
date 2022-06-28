@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hanchuanchuan/go-mysql/mysql"
-	"github.com/hanchuanchuan/go-mysql/replication"
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/replication"
 	"github.com/mholt/archiver/v3"
 	log "github.com/sirupsen/logrus"
 )

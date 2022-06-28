@@ -60,6 +60,7 @@ var (
 	sqlType = flag.String("sql-type", "insert,delete,update", "解析的语句类型")
 
 	maxRows = flag.Int("max", 100000, "解析的最大行数,设置为0则不限制")
+	threads = flag.Int("threads", 64, "解析线程数,影响文件解析速度")
 
 	output = flag.StringP("output", "o", "", "输出到指定文件")
 
@@ -81,15 +82,16 @@ var (
 	runServer  = flagBoolean("server", "s", false, "启动API服务")
 	configFile = flag.StringP("config", "c", "config.ini", "以服务方式启动时需指定配置文件")
 
-	debug      = flagBoolean("debug", "", false, "调试模式,输出详细日志")
-	cpuProfile = flagBoolean("cpu-profile", "", false, "调试模式,开启CPU性能跟踪")
+	debug = flagBoolean("debug", "", false, "调试模式,输出详细日志")
+	mode  = flag.String("profile-mode", "", "enable profiling mode, one of [cpu, mem, mutex, block]")
+	// cpuProfile = flagBoolean("cpu-profile", "", false, "调试模式,开启CPU性能跟踪")
 )
 
 func main() {
 
 	flag.SortFlags = false
 	// 隐藏CPU性能跟踪调试参数
-	flag.MarkHidden("cpu-profile")
+	// flag.MarkHidden("cpu-profile")
 
 	if err := flag.Parse(os.Args[1:]); err != nil {
 		log.Error(err)
@@ -102,13 +104,20 @@ func main() {
 		return
 	}
 
-	// defer profile.Start(profile.MemProfile).Stop()
-	if *cpuProfile {
-		defer profile.Start(profile.ProfilePath(".")).Stop()
+	switch *mode {
+	case "cpu":
+		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+	case "mem":
+		defer profile.Start(profile.MemProfile, profile.ProfilePath(".")).Stop()
+	case "mutex":
+		defer profile.Start(profile.MutexProfile, profile.ProfilePath(".")).Stop()
+	case "block":
+		defer profile.Start(profile.BlockProfile, profile.ProfilePath(".")).Stop()
+	default:
+		// do nothing
 	}
 
-	// parserProcess = make(map[string]*parser.MyBinlogParser)
-
+	// log.SetReportCaller(true)
 	// 以服务方式运行
 	if *runServer {
 		if *configFile == "" {
@@ -123,7 +132,6 @@ func main() {
 		} else {
 			log.SetLevel(log.ErrorLevel)
 		}
-
 		// 以独立工具运行
 		runParse()
 	}
@@ -155,6 +163,7 @@ func runParse() {
 		Tables:    *tables,
 		SqlType:   *sqlType,
 		MaxRows:   *maxRows,
+		Threads:   *threads,
 
 		OutputFileStr: *output,
 
@@ -484,7 +493,7 @@ func download(c echo.Context) error {
 }
 
 func flagBoolean(name string, shorthand string, defaultVal bool, usage string) *bool {
-	if defaultVal == false {
+	if !defaultVal {
 		// Fix #4125, golang do not print default false value in usage, so we append it.
 		usage = fmt.Sprintf("%s (default false)", usage)
 		return flag.BoolP(name, shorthand, defaultVal, usage)
