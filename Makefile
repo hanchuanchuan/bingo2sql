@@ -49,16 +49,14 @@ CHECK_LDFLAGS += $(LDFLAGS)
 
 default: server buildsucc
 
+build:
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)' -o bin/$(PROJECT) main.go
+
+
 server-admin-check: server_check buildsucc
 
 buildsucc:
-	@echo Build TiDB Server successfully!
-
-all: server
-
-
-build:
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags '-s -w $(LDFLAGS)' -o bin/$(PROJECT) cmd/bingo2sql.go
+	@echo Build bingo2sql successfully!
 
 # The retool tools.json is setup from hack/retool-install.sh
 check-setup:
@@ -152,10 +150,13 @@ endif
 
 
 server:
-	$(GOBUILD) $(RACE_FLAG) -ldflags '$(LDFLAGS)' -o bin/$(PROJECT) cmd/bingo2sql.go
+	$(GOBUILD) $(RACE_FLAG) -ldflags '$(LDFLAGS)' -o bin/$(PROJECT) main.go
+
+server_old:
+	$(GOBUILD) $(RACE_FLAG) -ldflags '$(LDFLAGS)' -o bin/$(PROJECT) cmd/bingo2sql/main.go
 
 server_check:
-	$(GOBUILD) $(RACE_FLAG) -ldflags '$(CHECK_LDFLAGS)' -o bin/$(PROJECT) cmd/bingo2sql.go
+	$(GOBUILD) $(RACE_FLAG) -ldflags '$(CHECK_LDFLAGS)' -o bin/$(PROJECT) main.go
 
 
 update:

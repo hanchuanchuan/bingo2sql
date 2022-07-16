@@ -16,33 +16,28 @@ limitations under the License.
 package cmd
 
 import (
-	"github.com/hanchuanchuan/bingo2sql"
+	"math"
+
+	"github.com/hanchuanchuan/bingo2sql/core"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 // rootCmd represents the base command when called without any subcommands
-var localCmd = &cobra.Command{
-	Use:   "local",
-	Short: "本地解析",
-	Long:  `指定binlog文件和表结构文件.`,
+var remoteCmd = &cobra.Command{
+	Use:   "remote",
+	Short: "远程解析",
+	Long:  `远程解析需要指定数据库地址/端口等信息`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
-		if cfg.Debug {
-			log.SetLevel(log.DebugLevel)
+		// thread_id溢出处理
+		if threadID > math.MaxUint32 {
+			cfg.ThreadID = uint32(threadID % (1 << 32))
 		} else {
-			log.SetLevel(log.ErrorLevel)
+			cfg.ThreadID = uint32(threadID)
 		}
-
-		// // thread_id溢出处理
-		// if *threadID > math.MaxUint32 {
-		// 	cfg.ThreadID = uint32(*threadID % (1 << 32))
-		// } else {
-		// 	cfg.ThreadID = uint32(*threadID)
-		// }
-
-		if p, err := bingo2sql.NewBinlogParser(cfg); err != nil {
+		if p, err := core.NewBinlogParser(&cfg); err != nil {
 			log.Error("binlog解析操作失败")
 			log.Error(err)
 			return
@@ -54,30 +49,22 @@ var localCmd = &cobra.Command{
 				return
 			}
 		}
-
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(localCmd)
+	rootCmd.AddCommand(remoteCmd)
 
-	flag := localCmd.Flags()
+	flag := remoteCmd.Flags()
 	flag.SortFlags = false
 
-	// cfg = &bingo2sql.BinlogParserConfig{}
-	if cfg == nil {
-		cfg = &bingo2sql.BinlogParserConfig{}
-	}
+	flag.StringVarP(&cfg.Host, "host", "h", "", "host")
+	flag.Uint16VarP(&cfg.Port, "port", "P", 3306, "port")
+	flag.StringVarP(&cfg.User, "user", "u", "", "user")
+	flag.StringVarP(&cfg.Password, "password", "p", "", "password")
+	flag.Bool("help", false, "help for remote")
 
-	flag.StringVar(&cfg.StartFile, "start-file", "", "start-file")
-	flag.IntVar(&cfg.StartPosition, "start-pos", 0, "start-pos")
-
-	flag.StringVar(&cfg.StartTime, "start-time", "", "start-time")
-	flag.StringVar(&cfg.StopTime, "stop-time", "", "stop-time")
-
-	flag.StringVarP(&cfg.Databases, "databases", "d", "", "数据库列表,多个时以逗号分隔")
-	flag.StringVarP(&cfg.Tables, "tables", "t", "", "表名,如果数据库为多个,则需指名表前缀,多个时以逗号分隔")
+	flag.BoolVarP(&cfg.StopNever, "stop-never", "N", false, "持续解析binlog")
 
 	initCommonFalg(flag)
-
 }

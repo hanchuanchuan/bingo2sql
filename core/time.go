@@ -1,4 +1,4 @@
-package bingo2sql
+package core
 
 import (
 	"time"

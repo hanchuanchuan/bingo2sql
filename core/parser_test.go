@@ -1,4 +1,4 @@
-package bingo2sql_test
+package core_test
 
 import (
 	"bufio"

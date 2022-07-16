@@ -8,3 +8,4 @@ coverage.out
 *.fail.go
 .DS_Store
 .vscode/
+*.sql
