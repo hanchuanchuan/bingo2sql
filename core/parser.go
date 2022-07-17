@@ -288,7 +288,6 @@ var (
 )
 
 func init() {
-
 	TimeLocation, _ = time.LoadLocation("Asia/Shanghai")
 }
 
