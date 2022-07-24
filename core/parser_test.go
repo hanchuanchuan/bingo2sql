@@ -14,7 +14,7 @@ import (
 	"github.com/go-mysql-org/go-mysql/client"
 	"github.com/go-mysql-org/go-mysql/mysql"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/hanchuanchuan/bingo2sql"
+	"github.com/hanchuanchuan/bingo2sql/core"
 	. "github.com/pingcap/check"
 	log "github.com/sirupsen/logrus"
 )
@@ -93,8 +93,8 @@ var (
 	tableSchemaFile string = "table_schema.sql"
 )
 var (
-	defaultConfig bingo2sql.BinlogParserConfig
-	localConfig   bingo2sql.BinlogParserConfig
+	defaultConfig core.BinlogParserConfig
+	localConfig   core.BinlogParserConfig
 )
 var _ = Suite(&testParserSuite{})
 
@@ -107,12 +107,12 @@ type testParserSuite struct {
 
 	flavor string
 
-	config      bingo2sql.BinlogParserConfig // 远程解析
-	localConfig bingo2sql.BinlogParserConfig // 本地解析
+	config      core.BinlogParserConfig // 远程解析
+	localConfig core.BinlogParserConfig // 本地解析
 }
 
 func (t *testParserSuite) SetUpSuite(c *C) {
-	defaultConfig = bingo2sql.BinlogParserConfig{
+	defaultConfig = core.BinlogParserConfig{
 		Host:     *testHost,
 		Port:     3306,
 		User:     "test",
@@ -124,7 +124,7 @@ func (t *testParserSuite) SetUpSuite(c *C) {
 		OutputFileStr: binlogOutputFile,
 	}
 
-	localConfig = bingo2sql.BinlogParserConfig{
+	localConfig = core.BinlogParserConfig{
 		// 通过setBinlogDir自动获取
 		// StartFile: "mysql-bin.000001",
 
@@ -452,9 +452,9 @@ func (t *testParserSuite) getBinlog(c *C) []string {
 }
 
 // getBinlogWithConfig 根据配置文件
-func (t *testParserSuite) getBinlogWithConfig(c *C, config *bingo2sql.BinlogParserConfig) []string {
+func (t *testParserSuite) getBinlogWithConfig(c *C, config *core.BinlogParserConfig) []string {
 
-	p, err := bingo2sql.NewBinlogParser(config)
+	p, err := core.NewBinlogParser(config)
 	c.Assert(err, IsNil)
 
 	err = p.Parser()
@@ -1030,17 +1030,17 @@ func (t *testParserSuite) TestGTID(c *C) {
 	// ---- 错误GTID ----
 
 	t.SetIncludeGtids("123")
-	_, err := bingo2sql.NewBinlogParser(&t.config)
+	_, err := core.NewBinlogParser(&t.config)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
 
 	t.SetIncludeGtids(uuid)
-	_, err = bingo2sql.NewBinlogParser(&t.localConfig)
+	_, err = core.NewBinlogParser(&t.localConfig)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
 
 	t.SetIncludeGtids(uuid + ":abc")
-	_, err = bingo2sql.NewBinlogParser(&t.localConfig)
+	_, err = core.NewBinlogParser(&t.localConfig)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "GTID解析失败!(strconv.ParseInt: parsing \"abc\": invalid syntax)")
 
@@ -1241,11 +1241,11 @@ func TestComputePercent(t *testing.T) {
 		Name: "001",
 		Pos:  100,
 	}
-	master := bingo2sql.MasterStatus{
+	master := core.MasterStatus{
 		File:     "002",
 		Position: 600,
 	}
-	binlogs := []bingo2sql.MasterLog{
+	binlogs := []core.MasterLog{
 		{
 			Name: "001",
 			Size: 1000,
@@ -1256,7 +1256,7 @@ func TestComputePercent(t *testing.T) {
 		},
 	}
 
-	pct := bingo2sql.ComputePercent(start, stop, current,
+	pct := core.ComputePercent(start, stop, current,
 		master, binlogs)
 	expected := 10
 	if pct != expected {
@@ -1267,7 +1267,7 @@ func TestComputePercent(t *testing.T) {
 		Name: "002",
 		Pos:  0,
 	}
-	pct = bingo2sql.ComputePercent(start, stop, current,
+	pct = core.ComputePercent(start, stop, current,
 		master, binlogs)
 	expected = 5
 	if pct != expected {
@@ -1278,7 +1278,7 @@ func TestComputePercent(t *testing.T) {
 		Name: "003",
 		Pos:  0,
 	}
-	pct = bingo2sql.ComputePercent(start, stop, current,
+	pct = core.ComputePercent(start, stop, current,
 		master, binlogs)
 	expected = 5
 	if pct != expected {
@@ -1297,7 +1297,7 @@ func TestComputePercent(t *testing.T) {
 		Name: "002",
 		Pos:  400,
 	}
-	pct = bingo2sql.ComputePercent(start, stop, current,
+	pct = core.ComputePercent(start, stop, current,
 		master, binlogs)
 	expected = 85
 	if pct != expected {

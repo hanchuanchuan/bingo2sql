@@ -171,7 +171,6 @@ endif
 	bash ./hack/clean_vendor.sh
 
 
-
 gofail-enable:
 # Converting gofail failpoints...
 	@$(GOFAIL_ENABLE)
