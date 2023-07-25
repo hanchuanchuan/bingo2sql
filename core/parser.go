@@ -735,7 +735,7 @@ func (p *MyBinlogParser) write2(b []byte) {
 }
 
 // NewBinlogParser binlog解析器
-func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
+func NewBinlogParser(ctx context.Context, cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 
 	p := new(MyBinlogParser)
 
@@ -836,7 +836,7 @@ func NewBinlogParser(cfg *BinlogParserConfig) (*MyBinlogParser, error) {
 		return nil, err
 	}
 
-	p.ctx, p.cancelFn = context.WithCancel(context.Background())
+	p.ctx, p.cancelFn = context.WithCancel(ctx)
 
 	return p, nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -170,7 +171,7 @@ func runParse() {
 		cfg.ThreadID = uint32(*threadID)
 	}
 
-	if p, err := core.NewBinlogParser(cfg); err != nil {
+	if p, err := core.NewBinlogParser(context.Background(), cfg); err != nil {
 		log.Error("binlog解析操作失败")
 		log.Error(err)
 		return

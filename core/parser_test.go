@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -454,7 +455,7 @@ func (t *testParserSuite) getBinlog(c *C) []string {
 // getBinlogWithConfig 根据配置文件
 func (t *testParserSuite) getBinlogWithConfig(c *C, config *core.BinlogParserConfig) []string {
 
-	p, err := core.NewBinlogParser(config)
+	p, err := core.NewBinlogParser(context.Background(), config)
 	c.Assert(err, IsNil)
 
 	err = p.Parser()
@@ -1030,17 +1031,17 @@ func (t *testParserSuite) TestGTID(c *C) {
 	// ---- 错误GTID ----
 
 	t.SetIncludeGtids("123")
-	_, err := core.NewBinlogParser(&t.config)
+	_, err := core.NewBinlogParser(context.Background(), &t.config)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
 
 	t.SetIncludeGtids(uuid)
-	_, err = core.NewBinlogParser(&t.localConfig)
+	_, err = core.NewBinlogParser(context.Background(), &t.localConfig)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "错误GTID格式!正确格式为uuid:编号[-编号],多个时以逗号分隔")
 
 	t.SetIncludeGtids(uuid + ":abc")
-	_, err = core.NewBinlogParser(&t.localConfig)
+	_, err = core.NewBinlogParser(context.Background(), &t.localConfig)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "GTID解析失败!(strconv.ParseInt: parsing \"abc\": invalid syntax)")
 

@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ limitations under the License.
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -46,7 +47,7 @@ var rootCmd = &cobra.Command{
 		} else {
 			cfg.ThreadID = uint32(threadID)
 		}
-		if p, err := core.NewBinlogParser(&cfg); err != nil {
+		if p, err := core.NewBinlogParser(context.Background(), &cfg); err != nil {
 			log.Error("binlog解析操作失败")
 			log.Error(err)
 			return

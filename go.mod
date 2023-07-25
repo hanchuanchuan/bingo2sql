@@ -26,6 +26,8 @@ require (
 	github.com/spf13/viper v1.6.2
 )
 
+require github.com/etcd-io/gofail v0.0.0-20180808172546-51ce9a71510a // indirect
+
 require (
 	github.com/andybalholm/brotli v0.0.0-20190621154722-5f990b63d2d6 // indirect
 	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect

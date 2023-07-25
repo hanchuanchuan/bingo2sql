@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -124,7 +125,7 @@ func ParseBinlog(c echo.Context) error {
 	// 	return c.JSON(http.StatusOK, r)
 	// }
 
-	p, err := core.NewBinlogParser(cfg)
+	p, err := core.NewBinlogParser(context.Background(), cfg)
 	if err != nil {
 		log.Error("binlog解析操作失败")
 		log.Error(err)
