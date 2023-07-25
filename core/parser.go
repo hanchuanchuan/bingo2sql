@@ -184,6 +184,8 @@ type BinlogParserConfig struct {
 	ShowTime    bool // 输出执行时间(相同时间时仅返回首次)
 	ShowAllTime bool // 输出所有执行时间
 	ShowThread  bool // 输出线程号,方便判断同一执行人的操作
+
+	uniqueKey string
 }
 
 type Parser interface {
@@ -291,8 +293,16 @@ func init() {
 	TimeLocation, _ = time.LoadLocation("Asia/Shanghai")
 }
 
+// SetUniqueKey 自定义唯一标识, 指定后通过ID()将返回该值
+func (cfg *BinlogParserConfig) SetUniqueKey(key string) {
+	cfg.uniqueKey = key
+}
+
 // ID 解析任务的唯一标识
 func (cfg *BinlogParserConfig) ID() string {
+	if cfg.uniqueKey != "" {
+		return cfg.uniqueKey
+	}
 
 	s1 := strings.Replace(cfg.Host, ".", "_", -1)
 	if len(s1) > 20 {
