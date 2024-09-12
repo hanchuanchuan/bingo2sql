@@ -17,10 +17,10 @@ import (
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/go-mysql-org/go-mysql/replication"
+	uuid "github.com/hanchuanchuan/bingo2sql/utils/uuid"
 	"github.com/jinzhu/gorm"
 	"github.com/jinzhu/now"
 	"github.com/mholt/archiver/v3"
-	uuid "github.com/satori/go.uuid"
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 
