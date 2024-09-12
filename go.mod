@@ -18,7 +18,6 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
 	github.com/pkg/profile v1.4.0
-	github.com/satori/go.uuid v1.2.0
 	github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v0.0.6
