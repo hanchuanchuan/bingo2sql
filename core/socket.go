@@ -6,14 +6,13 @@ package core
 // time go run mainRemote.go -start-time="2018-09-17 00:00:00" -stop-time="2018-09-25 00:00:00" -o=1.sql
 import (
 	"fmt"
+	"time"
 
-	"github.com/imroc/req"
+	req "github.com/imroc/req/v3"
 	log "github.com/sirupsen/logrus"
 )
 
 var URL string
-
-var header = req.Header{"Accept": "application/json"}
 
 // func init() {
 
@@ -43,34 +42,34 @@ func sendMsg(user string, event string, title string, text string, kwargs map[st
 
 	url := fmt.Sprintf("%s/room/%s", URL, user)
 
-	param := req.Param{
+	client := req.C().SetTimeout(5 * time.Second)
+
+	params := map[string]string{
 		"event":   event,
 		"title":   title,
 		"content": text,
 	}
 
-	if kwargs != nil && len(kwargs) > 0 {
+	if len(kwargs) > 0 {
 		for k, v := range kwargs {
-			param[k] = v
+			params[k] = fmt.Sprintf("%v", v)
 		}
 	}
 
-	r, err := req.Post(url, header, param)
+	resp, err := client.R().SetHeader("Accept", "application/json").
+		SetPathParams(params).
+		Post(url)
 	if err != nil {
 		log.Error("请求websocket失败!")
 		log.Print(err)
 		return false
 	}
-	// r.ToJSON(&foo)       // 响应体转成对象
-	// log.Printf("%+v", r) // 打印详细信息
-
-	resp := r.Response()
 
 	if resp.StatusCode == 200 {
 		return true
 	} else {
 		log.Error("请求websocket失败!")
-		log.Printf("%+v", r) // 打印详细信息
+		log.Printf("%#v", resp) // 打印详细信息
 		return false
 	}
 }
