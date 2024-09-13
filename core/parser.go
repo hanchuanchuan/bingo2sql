@@ -24,9 +24,9 @@ import (
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/hanchuanchuan/goInception/ast"
-	tidb "github.com/hanchuanchuan/goInception/mysql"
-	tidbParser "github.com/hanchuanchuan/goInception/parser"
+	tidbParser "github.com/pingcap/tidb/pkg/parser"
+	"github.com/pingcap/tidb/pkg/parser/ast"
+	tidb "github.com/pingcap/tidb/pkg/parser/mysql"
 )
 
 const digits01 = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
@@ -2118,7 +2118,7 @@ func buildTableInfo(node *ast.CreateTableStmt) *Table {
 			for _, col := range ct.Keys {
 				for _, field := range node.Cols {
 					if field.Name.Name.L == col.Column.Name.L {
-						field.Tp.Flag |= tidb.PriKeyFlag
+						field.Tp.AddFlag(tidb.PriKeyFlag)
 						break
 					}
 				}
@@ -2127,7 +2127,7 @@ func buildTableInfo(node *ast.CreateTableStmt) *Table {
 			for _, col := range ct.Keys {
 				for _, field := range node.Cols {
 					if field.Name.Name.L == col.Column.Name.L {
-						field.Tp.Flag |= tidb.UniqueKeyFlag
+						field.Tp.AddFlag(tidb.UniqueKeyFlag)
 						break
 					}
 				}
@@ -2155,7 +2155,12 @@ func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
 	for _, op := range field.Options {
 		switch op.Tp {
 		case ast.ColumnOptionComment:
-			c.ColumnComment = op.Expr.GetDatum().GetString()
+			// c.ColumnComment = op.Expr.GetDatum().GetString()
+			if op.Expr.OriginalText() != "" {
+				c.ColumnComment = op.Expr.OriginalText()
+			} else {
+				c.ColumnComment = op.Expr.Text()
+			}
 
 		case ast.ColumnOptionPrimaryKey:
 			c.ColumnKey = "PRI"
@@ -2172,9 +2177,9 @@ func buildNewColumnToCache(t *Table, field *ast.ColumnDef) *Column {
 		}
 	}
 
-	if c.ColumnKey != "PRI" && tidb.HasPriKeyFlag(field.Tp.Flag) {
+	if c.ColumnKey != "PRI" && tidb.HasPriKeyFlag(field.Tp.GetFlag()) {
 		c.ColumnKey = "PRI"
-	} else if tidb.HasUniKeyFlag(field.Tp.Flag) {
+	} else if tidb.HasUniKeyFlag(field.Tp.GetFlag()) {
 		c.ColumnKey = "UNI"
 	}
 	return c

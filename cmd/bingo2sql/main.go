@@ -9,6 +9,7 @@ import (
 
 	"github.com/hanchuanchuan/bingo2sql/core"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
+	_ "github.com/pingcap/tidb/pkg/parser/test_driver"
 	"github.com/pkg/profile"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
